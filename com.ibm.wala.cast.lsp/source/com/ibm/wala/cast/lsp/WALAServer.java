@@ -105,11 +105,11 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	}
 	
 	public WALAServer(CallGraph CG, HeapModel H) {
-		for(CGNode n : CG) {
+		CG.iterator().forEachRemaining((CGNode n) -> { 
 			IMethod M = n.getMethod();
 			IR ir = n.getIR();
-			for(SSAInstruction inst : ir.getInstructions()) {
-				if (inst != null && inst.hasDef()) {
+			ir.iterateAllInstructions().forEachRemaining((SSAInstruction inst) -> {
+				if (inst.hasDef()) {
 					PointerKey v = H.getPointerKeyForLocal(n, inst.getDef());
 					if (M instanceof AstMethod) {
 						Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(inst.iindex);
@@ -118,8 +118,8 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 						}
 					}
 				}
-			}
-		}
+			});
+		});
 	}
 
 	@Override
