@@ -1,0 +1,13 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: WALA LSP server
+Bundle-SymbolicName: com.ibm.wala.cast.lsp
+Bundle-Version: 0.0.1.qualifier
+Bundle-Vendor: IBM
+Bundle-RequiredExecutionEnvironment: JavaSE-1.8
+Require-Bundle: com.ibm.wala.cast;bundle-version="1.4.4",
+ com.ibm.wala.core;bundle-version="1.4.4",
+ com.ibm.wala.shrike;bundle-version="1.4.4",
+ org.eclipse.lsp4j;bundle-version="0.3.0",
+ org.eclipse.lsp4j.jsonrpc;bundle-version="0.3.0"
+Export-Package: com.ibm.wala.cast.lsp
