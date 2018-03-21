@@ -69,12 +69,14 @@ import com.ibm.wala.util.collections.HashSetFactory;
 public class WALAServer implements LanguageClientAware, LanguageServer {
 	private final Set<LanguageClient> clients = HashSetFactory.make();
 	private final Map<URL, NavigableMap<Position,PointerKey>> values = HashMapFactory.make();
+	private final Map<URL, NavigableMap<Position,int[]>> instructions = HashMapFactory.make();
+
+	private final Set<Function<PointerKey,String>> valueAnalyses = HashSetFactory.make();
+	private final Set<Function<int[],String>> instructionAnalyses = HashSetFactory.make();
 	
-	private final Set<Function<PointerKey,String>> analyses = HashSetFactory.make();
-	
-	private void ensureUrlValues(URL url) {
-		if (! values.containsKey(url)) {
-			values.put(url, new TreeMap<Position,PointerKey>(new Comparator<Position>() {
+	private <X> void ensureUrlEntry(URL url, Map<URL, NavigableMap<Position, X>> map) {
+		if (! map.containsKey(url)) {
+			map.put(url, new TreeMap<Position,X>(new Comparator<Position>() {
 				private int check(int v1, int v2, IntSupplier otherwise) {
 					if (v1 != v2) {
 						return v1 - v2;
@@ -97,12 +99,22 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	
 	private void add(Position p, PointerKey v) {
 		URL url = p.getURL();
-		ensureUrlValues(url);
+		ensureUrlEntry(url, values);
 		values.get(url).put(p, v);
 	}
-	
-	public void add(Function<PointerKey,String> analysis) {
-		analyses.add(analysis);
+
+	private void add(Position p, int[] v) {
+		URL url = p.getURL();
+		ensureUrlEntry(url, instructions);
+		instructions.get(url).put(p, v);
+	}
+
+	public void addValueAnalysis(Function<PointerKey,String> analysis) {
+		valueAnalyses.add(analysis);
+	}
+
+	public void addInstructionAnalysis(Function<int[],String> analysis) {
+		instructionAnalyses.add(analysis);
 	}
 	
 	public PointerKey getValue(Position p) {
@@ -117,18 +129,23 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	public WALAServer(CallGraph CG, HeapModel H) {
 		CG.iterator().forEachRemaining((CGNode n) -> { 
 			IMethod M = n.getMethod();
+			if (M instanceof AstMethod) {
 			IR ir = n.getIR();
 			ir.iterateAllInstructions().forEachRemaining((SSAInstruction inst) -> {
+				Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(inst.iindex);
+				if (pos != null) {
+					add(pos, new int[] {CG.getNumber(n), inst.iindex});
+				}
 				if (inst.hasDef()) {
 					PointerKey v = H.getPointerKeyForLocal(n, inst.getDef());
 					if (M instanceof AstMethod) {
-						Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(inst.iindex);
 						if (pos != null) {
 							add(pos, v);
 						}
 					}
 				}
 			});
+			}
 		});
 	}
 
@@ -286,13 +303,22 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	public String toString() {
 		StringBuffer sb = new StringBuffer("WALA Server:\n");
-		for(URL script : values.keySet()) {
-			for(Map.Entry<Position, PointerKey> v : values.get(script).entrySet()) {
-				sb.append(v.getKey() + ":" + v.getValue());
-				for(Function<PointerKey,String> a : analyses) {
-					String s = a.apply(v.getValue());
+		for(URL script : instructions.keySet()) {
+			for(Map.Entry<Position, int[]> v : instructions.get(script).entrySet()) {
+				sb.append(v.getKey());
+				
+				for(Function<int[],String> a : instructionAnalyses) {
+					String s = a.apply(instructions.get(script).get(v.getKey()));
 					if (s != null) {
 						sb.append(" :" + s);
+					}
+				}
+				if (values.containsKey(script) && values.get(script).containsKey(v.getKey())) {
+					for(Function<PointerKey,String> a : valueAnalyses) {
+						String s = a.apply(values.get(script).get(v.getKey()));
+						if (s != null) {
+							sb.append(" :" + s);
+						}
 					}
 				}
 				sb.append("\n");
