@@ -34,7 +34,9 @@ import org.eclipse.lsp4j.CodeLensParams;
 import org.eclipse.lsp4j.Command;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionList;
+import org.eclipse.lsp4j.DidChangeConfigurationParams;
 import org.eclipse.lsp4j.DidChangeTextDocumentParams;
+import org.eclipse.lsp4j.DidChangeWatchedFilesParams;
 import org.eclipse.lsp4j.DidCloseTextDocumentParams;
 import org.eclipse.lsp4j.DidOpenTextDocumentParams;
 import org.eclipse.lsp4j.DidSaveTextDocumentParams;
@@ -48,6 +50,7 @@ import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializeResult;
 import org.eclipse.lsp4j.InitializedParams;
 import org.eclipse.lsp4j.Location;
+import org.eclipse.lsp4j.MessageParams;
 import org.eclipse.lsp4j.ReferenceParams;
 import org.eclipse.lsp4j.RenameParams;
 import org.eclipse.lsp4j.SignatureHelp;
@@ -55,8 +58,8 @@ import org.eclipse.lsp4j.SymbolInformation;
 import org.eclipse.lsp4j.TextDocumentPositionParams;
 import org.eclipse.lsp4j.TextEdit;
 import org.eclipse.lsp4j.WorkspaceEdit;
+import org.eclipse.lsp4j.WorkspaceSymbolParams;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
-import org.eclipse.lsp4j.jsonrpc.services.JsonNotification;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageClientAware;
 import org.eclipse.lsp4j.services.LanguageServer;
@@ -163,12 +166,18 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	@Override
 	public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
+		System.err.println("client sent " + params);
 		InitializeResult v = new InitializeResult();
 		return CompletableFuture.completedFuture(v);
 	}
 
 	public void initialized(InitializedParams params) {
 		System.err.println("client sent " + params);
+		MessageParams m = new MessageParams();
+		m.setMessage("Welcome to WALA");
+		for(LanguageClient c : clients) {
+			c.showMessage(m);
+		}
 	}
 	
 	@Override
@@ -369,8 +378,26 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	@Override
 	public WorkspaceService getWorkspaceService() {
-		// TODO Auto-generated method stub
-		return null;
+		return new WorkspaceService() {
+
+			@Override
+			public CompletableFuture<List<? extends SymbolInformation>> symbol(WorkspaceSymbolParams params) {
+				// TODO Auto-generated method stub
+				return null;
+			}
+
+			@Override
+			public void didChangeConfiguration(DidChangeConfigurationParams params) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			public void didChangeWatchedFiles(DidChangeWatchedFilesParams params) {
+				// TODO Auto-generated method stub
+				
+			}
+		};
 	}
 
 	@Override
