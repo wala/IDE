@@ -10,7 +10,14 @@
  *****************************************************************************/
 package com.ibm.wala.cast.lsp;
 
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +46,7 @@ import org.eclipse.lsp4j.DocumentSymbolParams;
 import org.eclipse.lsp4j.Hover;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializeResult;
+import org.eclipse.lsp4j.InitializedParams;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.ReferenceParams;
 import org.eclipse.lsp4j.RenameParams;
@@ -48,6 +56,7 @@ import org.eclipse.lsp4j.TextDocumentPositionParams;
 import org.eclipse.lsp4j.TextEdit;
 import org.eclipse.lsp4j.WorkspaceEdit;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
+import org.eclipse.lsp4j.jsonrpc.services.JsonNotification;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageClientAware;
 import org.eclipse.lsp4j.services.LanguageServer;
@@ -74,9 +83,9 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	private final Set<Function<PointerKey,String>> valueAnalyses = HashSetFactory.make();
 	private final Set<Function<int[],String>> instructionAnalyses = HashSetFactory.make();
 	
-	private <X> void ensureUrlEntry(URL url, Map<URL, NavigableMap<Position, X>> map) {
+	private <X> NavigableMap<Position, X> ensureUrlEntry(URL url, Map<URL, NavigableMap<Position, X>> map) {
 		if (! map.containsKey(url)) {
-			map.put(url, new TreeMap<Position,X>(new Comparator<Position>() {
+			NavigableMap<Position, X> v = new TreeMap<Position,X>(new Comparator<Position>() {
 				private int check(int v1, int v2, IntSupplier otherwise) {
 					if (v1 != v2) {
 						return v1 - v2;
@@ -93,20 +102,23 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 								() -> { return check(o1.getLastLine(), o2.getLastLine(),
 									() -> { return check(o1.getLastCol(), o2.getLastCol(), null); }); }); });
 				} 
-			}));
+			});
+			
+			map.put(url, v);
+			return v;
+		} else {
+			return map.get(url);
 		}
 	}
 	
 	private void add(Position p, PointerKey v) {
 		URL url = p.getURL();
-		ensureUrlEntry(url, values);
-		values.get(url).put(p, v);
+		ensureUrlEntry(url, values).put(p, v);
 	}
 
 	private void add(Position p, int[] v) {
 		URL url = p.getURL();
-		ensureUrlEntry(url, instructions);
-		instructions.get(url).put(p, v);
+		ensureUrlEntry(url, instructions).put(p, v);
 	}
 
 	public void addValueAnalysis(Function<PointerKey,String> analysis) {
@@ -122,7 +134,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		if (m.containsKey(p)) {
 			return m.get(p);
 		} else {
-			return m.ceilingEntry(p).getValue();
+			return m.lowerEntry(p).getValue();
 		}
 	}
 	
@@ -151,10 +163,14 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	@Override
 	public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
-		// TODO Auto-generated method stub
-		return null;
+		InitializeResult v = new InitializeResult();
+		return CompletableFuture.completedFuture(v);
 	}
 
+	public void initialized(InitializedParams params) {
+		System.err.println("client sent " + params);
+	}
+	
 	@Override
 	public CompletableFuture<Object> shutdown() {
 		// TODO Auto-generated method stub
@@ -165,6 +181,58 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	public void exit() {
 		// TODO Auto-generated method stub
 
+	}
+
+	private Position lookupPos(org.eclipse.lsp4j.Position pos, URL url) {
+		return new Position() {
+
+			@Override
+			public int getFirstLine() {
+				return pos.getLine();
+			}
+
+			@Override
+			public int getLastLine() {
+				return pos.getLine();
+			}
+
+			@Override
+			public int getFirstCol() {
+				return pos.getCharacter();
+			}
+
+			@Override
+			public int getLastCol() {
+				return pos.getCharacter();
+			}
+
+			@Override
+			public int getFirstOffset() {
+				return -1;
+			}
+
+			@Override
+			public int getLastOffset() {
+				return -1;
+			}
+
+			@Override
+			public int compareTo(Object o) {
+				assert false;
+				return 0;
+			}
+
+			@Override
+			public URL getURL() {
+				return url;
+			}
+
+			@Override
+			public Reader getReader() throws IOException {
+				return new InputStreamReader(url.openConnection().getInputStream());
+			}
+			
+		};
 	}
 
 	@Override
@@ -185,9 +253,19 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			}
 
 			@Override
-			public CompletableFuture<Hover> hover(TextDocumentPositionParams position) {
-				// TODO Auto-generated method stub
-				return null;
+			public CompletableFuture<Hover> hover(TextDocumentPositionParams position) { 
+				return CompletableFuture.supplyAsync(() -> {
+					try {
+						Position lookupPos = lookupPos(position.getPosition(), new URI(position.getTextDocument().getUri()).toURL());
+						String msg = positionToString(lookupPos);
+						Hover reply = new Hover();
+						reply.setContents(Collections.singletonList(Either.forLeft(msg)));
+						return reply;
+					} catch (MalformedURLException | URISyntaxException e) {
+						assert false : e.toString();
+						return null;
+					}
+				});
 			}
 
 			@Override
@@ -285,8 +363,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			public void didSave(DidSaveTextDocumentParams params) {
 				// TODO Auto-generated method stub
 				
-			}
-			
+			}	
 		};
 	}
 
@@ -301,27 +378,33 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		clients.add(client);
 	}
 
+	private String positionToString(Position pos) {
+		StringBuffer sb = new StringBuffer(pos.toString());
+	
+		for(Function<int[],String> a : instructionAnalyses) {
+			String s = a.apply(instructions.get(pos.getURL()).get(pos));
+			if (s != null) {
+				sb.append(" :" + s);
+			}	
+		}
+		if (values.containsKey(pos.getURL()) && values.get(pos.getURL()).containsKey(pos)) {
+			for(Function<PointerKey,String> a : valueAnalyses) {
+				String s = a.apply(values.get(pos.getURL()).get(pos));
+				if (s != null) {
+					sb.append(" :" + s);
+				}
+			}
+		}
+		sb.append("\n");
+		return sb.toString();
+	}
+
 	public String toString() {
 		StringBuffer sb = new StringBuffer("WALA Server:\n");
 		for(URL script : instructions.keySet()) {
 			for(Map.Entry<Position, int[]> v : instructions.get(script).entrySet()) {
-				sb.append(v.getKey());
-				
-				for(Function<int[],String> a : instructionAnalyses) {
-					String s = a.apply(instructions.get(script).get(v.getKey()));
-					if (s != null) {
-						sb.append(" :" + s);
-					}
-				}
-				if (values.containsKey(script) && values.get(script).containsKey(v.getKey())) {
-					for(Function<PointerKey,String> a : valueAnalyses) {
-						String s = a.apply(values.get(script).get(v.getKey()));
-						if (s != null) {
-							sb.append(" :" + s);
-						}
-					}
-				}
-				sb.append("\n");
+				Position pos = v.getKey();
+				sb.append(positionToString(pos));
 			}
 		}
 		return sb.toString();
