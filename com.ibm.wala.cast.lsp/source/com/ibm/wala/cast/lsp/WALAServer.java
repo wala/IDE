@@ -241,6 +241,9 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				return new InputStreamReader(url.openConnection().getInputStream());
 			}
 			
+			public String toString() {
+				return url + ":" + getFirstLine() + "," + getFirstCol();
+			}
 		};
 	}
 
@@ -408,15 +411,19 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	private String positionToString(Position pos) {
 		StringBuffer sb = new StringBuffer(pos.toString());
 	
+		System.err.println(pos);
+		Position nearest = instructions.get(pos.getURL()).floorEntry(pos).getKey();
+		System.err.println(nearest);
+		
 		for(Function<int[],String> a : instructionAnalyses) {
-			String s = a.apply(instructions.get(pos.getURL()).get(pos));
+			String s = a.apply(instructions.get(pos.getURL()).get(nearest));
 			if (s != null) {
 				sb.append(" :" + s);
 			}	
 		}
-		if (values.containsKey(pos.getURL()) && values.get(pos.getURL()).containsKey(pos)) {
+		if (values.containsKey(pos.getURL()) && values.get(pos.getURL()).containsKey(nearest)) {
 			for(Function<PointerKey,String> a : valueAnalyses) {
-				String s = a.apply(values.get(pos.getURL()).get(pos));
+				String s = a.apply(values.get(pos.getURL()).get(nearest));
 				if (s != null) {
 					sb.append(" :" + s);
 				}
@@ -429,6 +436,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	public String toString() {
 		StringBuffer sb = new StringBuffer("WALA Server:\n");
 		for(URL script : instructions.keySet()) {
+			sb.append(script + "\n");
 			for(Map.Entry<Position, int[]> v : instructions.get(script).entrySet()) {
 				Position pos = v.getKey();
 				sb.append(positionToString(pos));
