@@ -14,6 +14,8 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.net.MalformedURLException;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -59,7 +61,9 @@ import org.eclipse.lsp4j.TextDocumentPositionParams;
 import org.eclipse.lsp4j.TextEdit;
 import org.eclipse.lsp4j.WorkspaceEdit;
 import org.eclipse.lsp4j.WorkspaceSymbolParams;
+import org.eclipse.lsp4j.jsonrpc.Launcher;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
+import org.eclipse.lsp4j.launch.LSPLauncher;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageClientAware;
 import org.eclipse.lsp4j.services.LanguageServer;
@@ -145,21 +149,21 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		CG.iterator().forEachRemaining((CGNode n) -> { 
 			IMethod M = n.getMethod();
 			if (M instanceof AstMethod) {
-			IR ir = n.getIR();
-			ir.iterateAllInstructions().forEachRemaining((SSAInstruction inst) -> {
-				Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(inst.iindex);
-				if (pos != null) {
-					add(pos, new int[] {CG.getNumber(n), inst.iindex});
-				}
-				if (inst.hasDef()) {
-					PointerKey v = H.getPointerKeyForLocal(n, inst.getDef());
-					if (M instanceof AstMethod) {
-						if (pos != null) {
-							add(pos, v);
+				IR ir = n.getIR();
+				ir.iterateAllInstructions().forEachRemaining((SSAInstruction inst) -> {
+					Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(inst.iindex);
+					if (pos != null) {
+						add(pos, new int[] {CG.getNumber(n), inst.iindex});
+					}
+					if (inst.hasDef()) {
+						PointerKey v = H.getPointerKeyForLocal(n, inst.getDef());
+						if (M instanceof AstMethod) {
+							if (pos != null) {
+								add(pos, v);
+							}
 						}
 					}
-				}
-			});
+				});
 			}
 		});
 	}
@@ -445,9 +449,25 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		return sb.toString();
 	}
 	
-	public static void main(String[] args) {
-		// TODO Auto-generated method stub
-
+	public static WALAServer launch(int port, CallGraph CG, HeapModel H) throws IOException {
+		ServerSocket ss = new ServerSocket(port);
+		WALAServer server = new WALAServer(CG, H);
+		new Thread() {
+			@Override
+			public void run() {
+				while (true) {
+					try {
+						Socket conn = ss.accept();
+						Launcher<LanguageClient> launcher = LSPLauncher.createServerLauncher(server, conn.getInputStream(), conn.getOutputStream());
+						server.connect(launcher.getRemoteProxy());
+						launcher.startListening();
+					} catch (IOException e) {
+						
+					}
+				}
+			}
+		}.start();
+		return server;
 	}
 
 }
