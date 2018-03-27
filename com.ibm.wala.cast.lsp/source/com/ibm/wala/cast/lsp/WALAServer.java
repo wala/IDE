@@ -73,20 +73,28 @@ import org.eclipse.lsp4j.services.WorkspaceService;
 import com.ibm.wala.cast.loader.AstMethod;
 import com.ibm.wala.cast.tree.CAstSourcePositionMap.Position;
 import com.ibm.wala.classLoader.IMethod;
+import com.ibm.wala.classLoader.SourceURLModule;
+import com.ibm.wala.client.AbstractAnalysisEngine;
 import com.ibm.wala.ipa.callgraph.CGNode;
 import com.ibm.wala.ipa.callgraph.CallGraph;
 import com.ibm.wala.ipa.callgraph.propagation.HeapModel;
+import com.ibm.wala.ipa.callgraph.propagation.InstanceKey;
 import com.ibm.wala.ipa.callgraph.propagation.PointerKey;
+import com.ibm.wala.ipa.callgraph.propagation.PropagationCallGraphBuilder;
 import com.ibm.wala.ssa.IR;
 import com.ibm.wala.ssa.SSAInstruction;
+import com.ibm.wala.util.CancelException;
+import com.ibm.wala.util.NullProgressMonitor;
 import com.ibm.wala.util.collections.HashMapFactory;
 import com.ibm.wala.util.collections.HashSetFactory;
 
 public class WALAServer implements LanguageClientAware, LanguageServer {
-	private final Set<LanguageClient> clients = HashSetFactory.make();
+	private LanguageClient client;
 	private final Map<URL, NavigableMap<Position,PointerKey>> values = HashMapFactory.make();
 	private final Map<URL, NavigableMap<Position,int[]>> instructions = HashMapFactory.make();
 
+	private final Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>> languages;
+	
 	private final Set<Function<PointerKey,String>> valueAnalyses = HashSetFactory.make();
 	private final Set<Function<int[],String>> instructionAnalyses = HashSetFactory.make();
 	
@@ -145,29 +153,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		}
 	}
 	
-	public WALAServer(CallGraph CG, HeapModel H) {
-		CG.iterator().forEachRemaining((CGNode n) -> { 
-			IMethod M = n.getMethod();
-			if (M instanceof AstMethod) {
-				IR ir = n.getIR();
-				ir.iterateAllInstructions().forEachRemaining((SSAInstruction inst) -> {
-					Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(inst.iindex);
-					if (pos != null) {
-						add(pos, new int[] {CG.getNumber(n), inst.iindex});
-					}
-					if (inst.hasDef()) {
-						PointerKey v = H.getPointerKeyForLocal(n, inst.getDef());
-						if (M instanceof AstMethod) {
-							if (pos != null) {
-								add(pos, v);
-							}
-						}
-					}
-				});
-			}
-		});
+	public WALAServer(Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages2) {
+		this.languages = languages2.apply(this);
 	}
-
+	
 	@Override
 	public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
 		System.err.println("client sent " + params);
@@ -179,9 +168,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		System.err.println("client sent " + params);
 		MessageParams m = new MessageParams();
 		m.setMessage("Welcome to WALA");
-		for(LanguageClient c : clients) {
-			c.showMessage(m);
-		}
+		client.showMessage(m);
 	}
 	
 	@Override
@@ -359,8 +346,44 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public void didOpen(DidOpenTextDocumentParams params) {
-				// TODO Auto-generated method stub
+				try {
+				AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?> engine = languages.apply(params.getTextDocument().getLanguageId());
 				
+				engine.setModuleFiles(Collections.singleton(new SourceURLModule(new URL(params.getTextDocument().getUri()))));
+				
+				engine.buildAnalysisScope();
+				engine.buildClassHierarchy();
+				PropagationCallGraphBuilder cgBuilder = engine.defaultCallGraphBuilder();
+				
+				CallGraph CG = cgBuilder.makeCallGraph(engine.getOptions(), new NullProgressMonitor());
+				HeapModel H = cgBuilder.getPointerAnalysis().getHeapModel();
+				
+				CG.iterator().forEachRemaining((CGNode n) -> { 
+					IMethod M = n.getMethod();
+					if (M instanceof AstMethod) {
+						IR ir = n.getIR();
+						ir.iterateAllInstructions().forEachRemaining((SSAInstruction inst) -> {
+							Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(inst.iindex);
+							if (pos != null) {
+								add(pos, new int[] {CG.getNumber(n), inst.iindex});
+							}
+							if (inst.hasDef()) {
+								PointerKey v = H.getPointerKeyForLocal(n, inst.getDef());
+								if (M instanceof AstMethod) {
+									if (pos != null) {
+										add(pos, v);
+									}
+								}
+							}
+						});
+					}
+				});
+				
+				engine.performAnalysis(cgBuilder);
+				
+				} catch (IOException | IllegalArgumentException | CancelException e) {
+					
+				}
 			}
 
 			@Override
@@ -409,7 +432,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	@Override
 	public void connect(LanguageClient client) {
-		clients.add(client);
+		this.client = client;
 	}
 
 	private String positionToString(Position pos) {
@@ -449,9 +472,14 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		return sb.toString();
 	}
 	
-	public static WALAServer launch(int port, CallGraph CG, HeapModel H) throws IOException {
+	public static WALAServer launch(int port, Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages) throws IOException {
 		ServerSocket ss = new ServerSocket(port);
-		WALAServer server = new WALAServer(CG, H);
+		WALAServer server = new WALAServer(languages) {
+			@Override
+			public void finalize() throws IOException {
+				ss.close();
+			}
+		};
 		new Thread() {
 			@Override
 			public void run() {
@@ -462,7 +490,9 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 						server.connect(launcher.getRemoteProxy());
 						launcher.startListening();
 					} catch (IOException e) {
-						
+						if (ss.isClosed()) {
+							break;
+						}
 					}
 				}
 			}
