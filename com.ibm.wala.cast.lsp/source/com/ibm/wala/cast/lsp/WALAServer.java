@@ -126,12 +126,12 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		}
 	}
 	
-	private void add(Position p, PointerKey v) {
+	public void add(Position p, PointerKey v) {
 		URL url = p.getURL();
 		ensureUrlEntry(url, values).put(p, v);
 	}
 
-	private void add(Position p, int[] v) {
+	public void add(Position p, int[] v) {
 		URL url = p.getURL();
 		ensureUrlEntry(url, instructions).put(p, v);
 	}
@@ -350,12 +350,9 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?> engine = languages.apply(params.getTextDocument().getLanguageId());
 				
 				engine.setModuleFiles(Collections.singleton(new SourceURLModule(new URL(params.getTextDocument().getUri()))));
-				
-				engine.buildAnalysisScope();
-				engine.buildClassHierarchy();
 				PropagationCallGraphBuilder cgBuilder = engine.defaultCallGraphBuilder();
 				
-				CallGraph CG = cgBuilder.makeCallGraph(engine.getOptions(), new NullProgressMonitor());
+				CallGraph CG = cgBuilder.getCallGraph();
 				HeapModel H = cgBuilder.getPointerAnalysis().getHeapModel();
 				
 				CG.iterator().forEachRemaining((CGNode n) -> { 
@@ -380,7 +377,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				});
 				
 				engine.performAnalysis(cgBuilder);
-				
+
 				} catch (IOException | IllegalArgumentException | CancelException e) {
 					
 				}
