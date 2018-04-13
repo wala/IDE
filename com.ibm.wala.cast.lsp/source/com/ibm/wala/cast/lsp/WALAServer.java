@@ -84,7 +84,6 @@ import com.ibm.wala.ipa.callgraph.propagation.PropagationCallGraphBuilder;
 import com.ibm.wala.ssa.IR;
 import com.ibm.wala.ssa.SSAInstruction;
 import com.ibm.wala.util.CancelException;
-import com.ibm.wala.util.NullProgressMonitor;
 import com.ibm.wala.util.collections.HashMapFactory;
 import com.ibm.wala.util.collections.HashSetFactory;
 
@@ -350,7 +349,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?> engine = languages.apply(params.getTextDocument().getLanguageId());
 				
 				engine.setModuleFiles(Collections.singleton(new SourceURLModule(new URL(params.getTextDocument().getUri()))));
-				PropagationCallGraphBuilder cgBuilder = engine.defaultCallGraphBuilder();
+				PropagationCallGraphBuilder cgBuilder = (PropagationCallGraphBuilder) engine.defaultCallGraphBuilder();
 				
 				CallGraph CG = cgBuilder.getCallGraph();
 				HeapModel H = cgBuilder.getPointerAnalysis().getHeapModel();
