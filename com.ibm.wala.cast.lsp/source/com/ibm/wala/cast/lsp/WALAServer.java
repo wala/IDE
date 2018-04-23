@@ -371,15 +371,17 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					if (M instanceof AstMethod) {
 						IR ir = n.getIR();
 						ir.iterateAllInstructions().forEachRemaining((SSAInstruction inst) -> {
-							Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(inst.iindex);
-							if (pos != null) {
-								add(pos, new int[] {CG.getNumber(n), inst.iindex});
-							}
-							if (inst.hasDef()) {
-								PointerKey v = H.getPointerKeyForLocal(n, inst.getDef());
-								if (M instanceof AstMethod) {
-									if (pos != null) {
-										add(pos, v);
+							if (inst.iindex != -1) {
+								Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(inst.iindex);
+								if (pos != null) {
+									add(pos, new int[] {CG.getNumber(n), inst.iindex});
+								}
+								if (inst.hasDef()) {
+									PointerKey v = H.getPointerKeyForLocal(n, inst.getDef());
+									if (M instanceof AstMethod) {
+										if (pos != null) {
+											add(pos, v);
+										}
 									}
 								}
 							}
