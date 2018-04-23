@@ -441,14 +441,14 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		for(Function<int[],String> a : instructionAnalyses) {
 			String s = a.apply(instructions.get(pos.getURL()).get(nearest));
 			if (s != null) {
-				sb.append(" :" + s);
+				sb.append("\n" + s);
 			}	
 		}
 		if (values.containsKey(pos.getURL()) && values.get(pos.getURL()).containsKey(nearest)) {
 			for(Function<PointerKey,String> a : valueAnalyses) {
 				String s = a.apply(values.get(pos.getURL()).get(nearest));
 				if (s != null) {
-					sb.append(" :" + s);
+					sb.append("\n" + s);
 				}
 			}
 		}
