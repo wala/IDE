@@ -12,6 +12,7 @@ package com.ibm.wala.cast.lsp;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.io.Reader;
 import java.net.MalformedURLException;
 import java.net.ServerSocket;
@@ -55,9 +56,11 @@ import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.MessageParams;
 import org.eclipse.lsp4j.ReferenceParams;
 import org.eclipse.lsp4j.RenameParams;
+import org.eclipse.lsp4j.ServerCapabilities;
 import org.eclipse.lsp4j.SignatureHelp;
 import org.eclipse.lsp4j.SymbolInformation;
 import org.eclipse.lsp4j.TextDocumentPositionParams;
+import org.eclipse.lsp4j.TextDocumentSyncKind;
 import org.eclipse.lsp4j.TextEdit;
 import org.eclipse.lsp4j.WorkspaceEdit;
 import org.eclipse.lsp4j.WorkspaceSymbolParams;
@@ -142,7 +145,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	public void addInstructionAnalysis(Function<int[],String> analysis) {
 		instructionAnalyses.add(analysis);
 	}
-	
+
 	public PointerKey getValue(Position p) {
 		NavigableMap<Position, PointerKey> m = values.get(p.getURL());
 		if (m.containsKey(p)) {
@@ -153,13 +156,22 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	}
 	
 	public WALAServer(Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages2) {
-		this.languages = languages2.apply(this);
+		this(languages2, null);
 	}
-	
+
+	public WALAServer(Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages2, Integer port) {
+		this.languages = languages2.apply(this);
+		this.serverPort = port;
+	}
+
 	@Override
 	public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
 		System.err.println("client sent " + params);
-		InitializeResult v = new InitializeResult();
+		final ServerCapabilities caps = new ServerCapabilities();
+		caps.setHoverProvider(true);
+		caps.setTextDocumentSync(TextDocumentSyncKind.Full);
+		InitializeResult v = new InitializeResult(caps);
+		System.err.println("server responding with " + v);
 		return CompletableFuture.completedFuture(v);
 	}
 
@@ -468,9 +480,14 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		return sb.toString();
 	}
 	
-	public static WALAServer launch(int port, Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages) throws IOException {
+	final private Integer serverPort;
+	public Integer getServerPort() {
+		return serverPort;
+	}
+
+	public static WALAServer launchOnServerPort(int port, Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages) throws IOException {
 		ServerSocket ss = new ServerSocket(port);
-		WALAServer server = new WALAServer(languages) {
+		WALAServer server = new WALAServer(languages, ss.getLocalPort()) {
 			@Override
 			public void finalize() throws IOException {
 				ss.close();
@@ -495,5 +512,27 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		}.start();
 		return server;
 	}
+	
+	public static WALAServer launchOnStdio(Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages) throws IOException {
+		WALAServer server = new WALAServer(languages);
+		Launcher<LanguageClient> launcher = LSPLauncher.createServerLauncher(server, System.in, System.out, true, new PrintWriter(System.err));
+		server.connect(launcher.getRemoteProxy());
+		launcher.startListening();
+		return server;
+	}
 
+	public static WALAServer launchOnClientPort(String hostname, int port, Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages) throws IOException {
+		final Socket conn = new Socket(hostname, port);
+		final WALAServer server = new WALAServer(languages, conn.getLocalPort()) {
+			@Override
+			public void finalize() throws IOException {
+				conn.close();
+			}
+		};
+
+		Launcher<LanguageClient> launcher = LSPLauncher.createServerLauncher(server, conn.getInputStream(), conn.getOutputStream());
+		server.connect(launcher.getRemoteProxy());
+		launcher.startListening();
+		return server;
+	}
 }
