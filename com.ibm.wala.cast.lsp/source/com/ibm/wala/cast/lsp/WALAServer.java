@@ -87,6 +87,7 @@ import com.ibm.wala.ipa.callgraph.propagation.PropagationCallGraphBuilder;
 import com.ibm.wala.ssa.IR;
 import com.ibm.wala.ssa.SSAInstruction;
 import com.ibm.wala.util.CancelException;
+import com.ibm.wala.util.CancelRuntimeException;
 import com.ibm.wala.util.collections.HashMapFactory;
 import com.ibm.wala.util.collections.HashSetFactory;
 
@@ -190,7 +191,6 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	@Override
 	public void exit() {
-		// TODO Auto-generated method stub
 
 	}
 
@@ -449,6 +449,14 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		StringBuffer sb = new StringBuffer(pos.toString());
 	
 		System.err.println(pos);
+		if (! instructions.containsKey(pos.getURL())) {
+			return "";
+		}
+		
+		if (instructions.get(pos.getURL()).floorEntry(pos) == null) {
+			return "";
+		}
+		
 		Position nearest = instructions.get(pos.getURL()).floorEntry(pos).getKey();
 		System.err.println(nearest);
 		
@@ -487,7 +495,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		return serverPort;
 	}
 
-	public static WALAServer launchOnServerPort(int port, Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages) throws IOException {
+	public static WALAServer launchOnServerPort(int port, Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages, boolean runAsDaemon) throws IOException {
 		ServerSocket ss = new ServerSocket(port);
 		WALAServer server = new WALAServer(languages, ss.getLocalPort()) {
 			@Override
@@ -495,23 +503,31 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				ss.close();
 			}
 		};
-		new Thread() {
+		Thread st = new Thread() {
 			@Override
 			public void run() {
-				while (true) {
-					try {
-						Socket conn = ss.accept();
-						Launcher<LanguageClient> launcher = LSPLauncher.createServerLauncher(server, conn.getInputStream(), conn.getOutputStream());
-						server.connect(launcher.getRemoteProxy());
-						launcher.startListening();
-					} catch (IOException e) {
-						if (ss.isClosed()) {
-							break;
+				try {
+					while (true) {
+						try {
+							Socket conn = ss.accept();
+							Launcher<LanguageClient> launcher = LSPLauncher.createServerLauncher(server, conn.getInputStream(), conn.getOutputStream());
+							server.connect(launcher.getRemoteProxy());
+							launcher.startListening();
+						} catch (IOException e) {
+							if (ss.isClosed()) {
+								break;
+							}
 						}
 					}
+				} catch (CancelRuntimeException e) {
+					System.err.println(e);
 				}
 			}
-		}.start();
+		};
+		if (runAsDaemon) {
+			st.setDaemon(true);
+		}
+		st.start();
 		return server;
 	}
 	
