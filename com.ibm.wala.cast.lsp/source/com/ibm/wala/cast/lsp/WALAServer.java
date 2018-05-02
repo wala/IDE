@@ -11,7 +11,9 @@
 package com.ibm.wala.cast.lsp;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.Reader;
 import java.net.MalformedURLException;
@@ -153,6 +155,46 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			return m.get(p);
 		} else {
 			return m.lowerEntry(p).getValue();
+		}
+	}
+	
+	public void analyze(String language, SourceURLModule src) {
+		try {
+			AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?> engine = languages.apply(language);
+
+			engine.setModuleFiles(Collections.singleton(src));
+			PropagationCallGraphBuilder cgBuilder = (PropagationCallGraphBuilder) engine.defaultCallGraphBuilder();
+
+			CallGraph CG = cgBuilder.getCallGraph();
+			HeapModel H = cgBuilder.getPointerAnalysis().getHeapModel();
+
+			CG.iterator().forEachRemaining((CGNode n) -> { 
+				IMethod M = n.getMethod();
+				if (M instanceof AstMethod) {
+					IR ir = n.getIR();
+					ir.iterateAllInstructions().forEachRemaining((SSAInstruction inst) -> {
+						if (inst.iindex != -1) {
+							Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(inst.iindex);
+							if (pos != null) {
+								add(pos, new int[] {CG.getNumber(n), inst.iindex});
+							}
+							if (inst.hasDef()) {
+								PointerKey v = H.getPointerKeyForLocal(n, inst.getDef());
+								if (M instanceof AstMethod) {
+									if (pos != null) {
+										add(pos, v);
+									}
+								}
+							}
+						}
+					});
+				}
+			});
+
+			engine.performAnalysis(cgBuilder);
+
+		} catch (IOException | IllegalArgumentException | CancelException e) {
+
 		}
 	}
 	
@@ -358,43 +400,12 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			@Override
 			public void didOpen(DidOpenTextDocumentParams params) {
 				try {
-				AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?> engine = languages.apply(params.getTextDocument().getLanguageId());
-				
-				engine.setModuleFiles(Collections.singleton(new SourceURLModule(new URL(params.getTextDocument().getUri()))));
-				PropagationCallGraphBuilder cgBuilder = (PropagationCallGraphBuilder) engine.defaultCallGraphBuilder();
-				
-				CallGraph CG = cgBuilder.getCallGraph();
-				HeapModel H = cgBuilder.getPointerAnalysis().getHeapModel();
-				
-				CG.iterator().forEachRemaining((CGNode n) -> { 
-					IMethod M = n.getMethod();
-					if (M instanceof AstMethod) {
-						IR ir = n.getIR();
-						ir.iterateAllInstructions().forEachRemaining((SSAInstruction inst) -> {
-							if (inst.iindex != -1) {
-								Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(inst.iindex);
-								if (pos != null) {
-									add(pos, new int[] {CG.getNumber(n), inst.iindex});
-								}
-								if (inst.hasDef()) {
-									PointerKey v = H.getPointerKeyForLocal(n, inst.getDef());
-									if (M instanceof AstMethod) {
-										if (pos != null) {
-											add(pos, v);
-										}
-									}
-								}
-							}
-						});
-					}
-				});
-				
-				engine.performAnalysis(cgBuilder);
-
-				} catch (IOException | IllegalArgumentException | CancelException e) {
-					
+					analyze(params.getTextDocument().getLanguageId(), new SourceURLModule(new URL(params.getTextDocument().getUri())));
+				} catch (MalformedURLException e) {
+					e.printStackTrace();
 				}
 			}
+			
 
 			@Override
 			public void didChange(DidChangeTextDocumentParams params) {
@@ -532,8 +543,15 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	}
 	
 	public static WALAServer launchOnStdio(Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages) throws IOException {
+		return launchOnStream(languages, System.in, System.out);
+	}
+
+	public static WALAServer launchOnStream(Function<WALAServer, 
+			Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages,
+			InputStream in,
+			OutputStream out) throws IOException {
 		WALAServer server = new WALAServer(languages);
-		Launcher<LanguageClient> launcher = LSPLauncher.createServerLauncher(server, System.in, System.out, true, new PrintWriter(System.err));
+		Launcher<LanguageClient> launcher = LSPLauncher.createServerLauncher(server, in, out, true, new PrintWriter(System.err));
 		server.connect(launcher.getRemoteProxy());
 		launcher.startListening();
 		return server;
