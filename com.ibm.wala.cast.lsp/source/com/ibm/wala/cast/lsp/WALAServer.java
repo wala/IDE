@@ -39,6 +39,7 @@ import org.eclipse.lsp4j.CodeLensParams;
 import org.eclipse.lsp4j.Command;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionList;
+import org.eclipse.lsp4j.CompletionParams;
 import org.eclipse.lsp4j.DidChangeConfigurationParams;
 import org.eclipse.lsp4j.DidChangeTextDocumentParams;
 import org.eclipse.lsp4j.DidChangeWatchedFilesParams;
@@ -55,6 +56,7 @@ import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializeResult;
 import org.eclipse.lsp4j.InitializedParams;
 import org.eclipse.lsp4j.Location;
+import org.eclipse.lsp4j.MarkupContent;
 import org.eclipse.lsp4j.MessageParams;
 import org.eclipse.lsp4j.ReferenceParams;
 import org.eclipse.lsp4j.RenameParams;
@@ -297,10 +299,9 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public CompletableFuture<Either<List<CompletionItem>, CompletionList>> completion(
-					TextDocumentPositionParams position) {
-				// TODO Auto-generated method stub
+					CompletionParams position) {
 				return null;
-			}
+			}	
 
 			@Override
 			public CompletableFuture<CompletionItem> resolveCompletionItem(CompletionItem unresolved) {
@@ -314,8 +315,12 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					try {
 						Position lookupPos = lookupPos(position.getPosition(), new URI(position.getTextDocument().getUri()).toURL());
 						String msg = positionToString(lookupPos);
+						MarkupContent md = new MarkupContent();
+						md.setKind("markdown");
+						md.setValue(msg);
 						Hover reply = new Hover();
-						reply.setContents(Collections.singletonList(Either.forLeft(msg)));
+						reply.setContents(md);
+//						reply.setContents(Collections.singletonList(Either.forRight(str)));
 						return reply;
 					} catch (MalformedURLException | URISyntaxException e) {
 						assert false : e.toString();
@@ -423,7 +428,8 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			public void didSave(DidSaveTextDocumentParams params) {
 				// TODO Auto-generated method stub
 				
-			}	
+			}
+
 		};
 	}
 
@@ -457,7 +463,8 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	}
 
 	private String positionToString(Position pos) {
-		StringBuffer sb = new StringBuffer(pos.toString());
+		StringBuffer sb = new StringBuffer();
+//		StringBuffer sb = new StringBuffer(pos.toString());
 	
 		System.err.println(pos);
 		if (! instructions.containsKey(pos.getURL())) {
@@ -469,7 +476,9 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		}
 		
 		Position nearest = instructions.get(pos.getURL()).floorEntry(pos).getKey();
-		System.err.println(nearest);
+		// System.err.println("LIST:" + instructions.get(pos.getURL()).keySet());
+		// System.err.println("CURSOR: " + pos);
+		// System.err.println("NEAREST: " + nearest);
 		
 		for(Function<int[],String> a : instructionAnalyses) {
 			String s = a.apply(instructions.get(pos.getURL()).get(nearest));
