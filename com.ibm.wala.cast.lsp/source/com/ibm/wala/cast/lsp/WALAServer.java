@@ -484,13 +484,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			return null;
 		}
 		
-		System.err.println(scriptPositions.keySet());
-		
 		Entry<Position, ?> next = entry;
 		while (next != null && within(next.getKey(), pos)) {
 			entry = next;
 			next = scriptPositions.higherEntry(entry.getKey());
-			System.err.println("looking at " + next);
 		}
 		
 		return entry.getKey();		
