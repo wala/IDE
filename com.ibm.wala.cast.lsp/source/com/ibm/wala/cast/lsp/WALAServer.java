@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
@@ -181,11 +182,16 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 								add(pos, new int[] {CG.getNumber(n), inst.iindex});
 							}
 							if (inst.hasDef()) {
-								PointerKey v = H.getPointerKeyForLocal(n, inst.getDef());
-								if (M instanceof AstMethod) {
-									if (pos != null) {
-										add(pos, v);
-									}
+								if (pos != null) {
+									PointerKey v = H.getPointerKeyForLocal(n, inst.getDef());
+									add(pos, v);
+								}
+							}
+							for(int i = 0; i < inst.getNumberOfUses(); i++) {
+								Position p = ((AstMethod)M).debugInfo().getOperandPosition(inst.iindex, i);
+								if (p != null) {
+									PointerKey v = H.getPointerKeyForLocal(n, inst.getUse(i));
+									add(p, v);
 								}
 							}
 						}
@@ -462,6 +468,34 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		this.client = client;
 	}
 
+	private boolean within(Position a, Position b) {
+		return (a.getFirstLine() < b.getFirstLine() ||
+				(a.getFirstLine() == b.getFirstLine() &&
+				 a.getFirstCol() <= b.getFirstCol())) 
+				&&
+				(a.getLastLine() > a.getLastLine() ||
+				 (a.getLastLine() == b.getLastLine() &&
+				  a.getLastCol() >= b.getLastCol()));
+	}
+				 
+	private Position getNearest(NavigableMap<Position, ?> scriptPositions, Position pos) {
+		Entry<Position, ?> entry = scriptPositions.floorEntry(pos);
+		if (entry == null) {
+			return null;
+		}
+		
+		System.err.println(scriptPositions.keySet());
+		
+		Entry<Position, ?> next = entry;
+		while (next != null && within(next.getKey(), pos)) {
+			entry = next;
+			next = scriptPositions.higherEntry(entry.getKey());
+			System.err.println("looking at " + next);
+		}
+		
+		return entry.getKey();		
+	}
+	
 	private String positionToString(Position pos) {
 		StringBuffer sb = new StringBuffer();
 //		StringBuffer sb = new StringBuffer(pos.toString());
@@ -471,29 +505,27 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			return "";
 		}
 		
-		if (instructions.get(pos.getURL()).floorEntry(pos) == null) {
-			return "";
-		}
-		
-		Position nearest = instructions.get(pos.getURL()).floorEntry(pos).getKey();
-		// System.err.println("LIST:" + instructions.get(pos.getURL()).keySet());
-		// System.err.println("CURSOR: " + pos);
-		// System.err.println("NEAREST: " + nearest);
+		NavigableMap<Position, int[]> scriptPositions = instructions.get(pos.getURL());
+		Position nearest = getNearest(scriptPositions, pos);
 		
 		for(Function<int[],String> a : instructionAnalyses) {
-			String s = a.apply(instructions.get(pos.getURL()).get(nearest));
+			String s = a.apply(scriptPositions.get(nearest));
 			if (s != null) {
 				sb.append("\n" + s);
 			}	
 		}
-		if (values.containsKey(pos.getURL()) && values.get(pos.getURL()).containsKey(nearest)) {
+		
+		if (values.containsKey(pos.getURL())) {
+			NavigableMap<Position, PointerKey> scriptPositions2 = values.get(pos.getURL());
+			nearest = getNearest(scriptPositions2, pos);
 			for(Function<PointerKey,String> a : valueAnalyses) {
-				String s = a.apply(values.get(pos.getURL()).get(nearest));
+				String s = a.apply(scriptPositions2.get(nearest));
 				if (s != null) {
 					sb.append("\n" + s);
 				}
 			}
 		}
+		
 		sb.append("\n");
 		return sb.toString();
 	}
