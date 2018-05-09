@@ -78,6 +78,9 @@ import org.eclipse.lsp4j.services.LanguageServer;
 import org.eclipse.lsp4j.services.TextDocumentService;
 import org.eclipse.lsp4j.services.WorkspaceService;
 
+import com.ibm.wala.cast.ir.ssa.AstIRFactory.AstIR;
+import com.ibm.wala.cast.ir.ssa.SSAConversion.CopyPropagationRecord;
+import com.ibm.wala.cast.ir.ssa.SSAConversion.SSAInformation;
 import com.ibm.wala.cast.loader.AstMethod;
 import com.ibm.wala.cast.tree.CAstSourcePositionMap.Position;
 import com.ibm.wala.classLoader.IMethod;
@@ -174,7 +177,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			CG.iterator().forEachRemaining((CGNode n) -> { 
 				IMethod M = n.getMethod();
 				if (M instanceof AstMethod) {
-					IR ir = n.getIR();
+					AstIR ir = (AstIR)n.getIR();
 					ir.iterateAllInstructions().forEachRemaining((SSAInstruction inst) -> {
 						if (inst.iindex != -1) {
 							Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(inst.iindex);
@@ -194,6 +197,17 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 									add(p, v);
 								}
 							}
+						}
+					});
+
+					SSAInformation info = ir.getLocalMap();
+					Map<Object, CopyPropagationRecord> copyHistory = info.getCopyHistory();
+					copyHistory.values().forEach((CopyPropagationRecord rec) -> {
+						int instIndex = rec.getInstructionIndex();
+						Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(instIndex);
+						if (pos != null) {
+							PointerKey v = H.getPointerKeyForLocal(n, rec.getRhs());
+							add(pos, v);
 						}
 					});
 				}
@@ -505,11 +519,13 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		NavigableMap<Position, int[]> scriptPositions = instructions.get(pos.getURL());
 		Position nearest = getNearest(scriptPositions, pos);
 		
+		if (nearest != null) {
 		for(Function<int[],String> a : instructionAnalyses) {
 			String s = a.apply(scriptPositions.get(nearest));
 			if (s != null) {
 				sb.append("\n" + s);
 			}	
+		}
 		}
 		
 		if (values.containsKey(pos.getURL())) {
@@ -531,7 +547,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		StringBuffer sb = new StringBuffer("WALA Server:\n");
 		for(URL script : instructions.keySet()) {
 			sb.append(script + "\n");
-			for(Map.Entry<Position, int[]> v : instructions.get(script).entrySet()) {
+			for(Map.Entry<Position, ?> v : values.get(script).entrySet()) {
 				Position pos = v.getKey();
 				sb.append(positionToString(pos));
 			}
