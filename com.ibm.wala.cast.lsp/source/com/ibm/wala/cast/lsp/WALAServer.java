@@ -507,38 +507,26 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		return entry.getKey();		
 	}
 	
-	private String positionToString(Position pos) {
-		StringBuffer sb = new StringBuffer();
-//		StringBuffer sb = new StringBuffer(pos.toString());
-	
-		System.err.println(pos);
-		if (! instructions.containsKey(pos.getURL())) {
-			return "";
-		}
+	private <T> void positionToString(Position pos, Map<URL, NavigableMap<Position,T>> map, Set<Function<T, String>> analyses, StringBuffer sb) {
+		if (map.containsKey(pos.getURL())) {
+			NavigableMap<Position, T> scriptPositions = map.get(pos.getURL());
+			Position nearest = getNearest(scriptPositions, pos);
 		
-		NavigableMap<Position, int[]> scriptPositions = instructions.get(pos.getURL());
-		Position nearest = getNearest(scriptPositions, pos);
-		
-		if (nearest != null) {
-		for(Function<int[],String> a : instructionAnalyses) {
-			String s = a.apply(scriptPositions.get(nearest));
-			if (s != null) {
-				sb.append("\n" + s);
-			}	
-		}
-		}
-		
-		if (values.containsKey(pos.getURL())) {
-			NavigableMap<Position, PointerKey> scriptPositions2 = values.get(pos.getURL());
-			nearest = getNearest(scriptPositions2, pos);
-			for(Function<PointerKey,String> a : valueAnalyses) {
-				String s = a.apply(scriptPositions2.get(nearest));
-				if (s != null) {
-					sb.append("\n" + s);
+			if (nearest != null) {
+				for(Function<T,String> a : analyses) {
+					String s = a.apply(scriptPositions.get(nearest));
+					if (s != null) {
+						sb.append("\n" + s);
+					}	
 				}
 			}
 		}
-		
+	}
+	
+	private String positionToString(Position pos) {
+		StringBuffer sb = new StringBuffer();
+		positionToString(pos, instructions, instructionAnalyses, sb);
+		positionToString(pos, values, valueAnalyses, sb);
 		sb.append("\n");
 		return sb.toString();
 	}
@@ -547,8 +535,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		StringBuffer sb = new StringBuffer("WALA Server:\n");
 		for(URL script : instructions.keySet()) {
 			sb.append(script + "\n");
-			for(Map.Entry<Position, ?> v : values.get(script).entrySet()) {
-				Position pos = v.getKey();
+			for(Position pos : values.get(script).keySet()) {
 				sb.append(positionToString(pos));
 			}
 		}
