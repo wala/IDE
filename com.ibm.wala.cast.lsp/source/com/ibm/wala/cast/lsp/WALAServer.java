@@ -22,7 +22,6 @@ import java.net.Socket;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -84,6 +83,7 @@ import com.ibm.wala.cast.ir.ssa.SSAConversion.SSAInformation;
 import com.ibm.wala.cast.loader.AstMethod;
 import com.ibm.wala.cast.tree.CAstSourcePositionMap.Position;
 import com.ibm.wala.classLoader.IMethod;
+import com.ibm.wala.classLoader.Module;
 import com.ibm.wala.classLoader.SourceURLModule;
 import com.ibm.wala.client.AbstractAnalysisEngine;
 import com.ibm.wala.ipa.callgraph.CGNode;
@@ -92,7 +92,6 @@ import com.ibm.wala.ipa.callgraph.propagation.HeapModel;
 import com.ibm.wala.ipa.callgraph.propagation.InstanceKey;
 import com.ibm.wala.ipa.callgraph.propagation.PointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PropagationCallGraphBuilder;
-import com.ibm.wala.ssa.IR;
 import com.ibm.wala.ssa.SSAInstruction;
 import com.ibm.wala.util.CancelException;
 import com.ibm.wala.util.CancelRuntimeException;
@@ -106,8 +105,18 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	private final Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>> languages;
 	
+	private final Map<String, Set<Module>> languageSources = HashMapFactory.make();
+	
 	private final Set<Function<PointerKey,String>> valueAnalyses = HashSetFactory.make();
 	private final Set<Function<int[],String>> instructionAnalyses = HashSetFactory.make();
+	
+	public boolean addSource(String language, Module file) {
+		if (! languageSources.containsKey(language)) {
+			languageSources.put(language, HashSetFactory.make());
+		}
+		
+		return languageSources.get(language).add(file);
+	}
 	
 	private <X> NavigableMap<Position, X> ensureUrlEntry(URL url, Map<URL, NavigableMap<Position, X>> map) {
 		if (! map.containsKey(url)) {
@@ -164,11 +173,11 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		}
 	}
 	
-	public void analyze(String language, SourceURLModule src) {
+	public void analyze(String language) {
 		try {
 			AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?> engine = languages.apply(language);
 
-			engine.setModuleFiles(Collections.singleton(src));
+			engine.setModuleFiles(languageSources.get(language));
 			PropagationCallGraphBuilder cgBuilder = (PropagationCallGraphBuilder) engine.defaultCallGraphBuilder();
 
 			CallGraph CG = cgBuilder.getCallGraph();
@@ -263,12 +272,14 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public int getFirstLine() {
-				return pos.getLine();
+				// LSP is 0-based, but parsers mostly 1-based
+				return pos.getLine() + 1;
 			}
 
 			@Override
 			public int getLastLine() {
-				return pos.getLine();
+				// LSP is 0-based, but parsers mostly 1-based
+				return pos.getLine() + 1;
 			}
 
 			@Override
@@ -425,7 +436,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			@Override
 			public void didOpen(DidOpenTextDocumentParams params) {
 				try {
-					analyze(params.getTextDocument().getLanguageId(), new SourceURLModule(new URL(params.getTextDocument().getUri())));
+					String language = params.getTextDocument().getLanguageId();
+					if (addSource(language, new SourceURLModule(new URL(params.getTextDocument().getUri())))) {
+						analyze(language);
+					}
 				} catch (MalformedURLException e) {
 					e.printStackTrace();
 				}
@@ -440,14 +454,31 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public void didClose(DidCloseTextDocumentParams params) {
-				// TODO Auto-generated method stub
-				
+				try {
+					Module M = new SourceURLModule(new URL(params.getTextDocument().getUri()));
+					for(Map.Entry<String, Set<Module>> sl : languageSources.entrySet()) {
+						if (sl.getValue().contains(M)) {
+							sl.getValue().remove(M);
+							analyze(sl.getKey());
+						}
+					}
+				} catch (MalformedURLException e) {
+					e.printStackTrace();
+				}
 			}
 
 			@Override
 			public void didSave(DidSaveTextDocumentParams params) {
-				// TODO Auto-generated method stub
-				
+				try {
+					Module M = new SourceURLModule(new URL(params.getTextDocument().getUri()));
+					for(Map.Entry<String, Set<Module>> sl : languageSources.entrySet()) {
+						if (sl.getValue().contains(M)) {
+							analyze(sl.getKey());
+						}
+					}
+				} catch (MalformedURLException e) {
+					e.printStackTrace();
+				}
 			}
 
 		};
