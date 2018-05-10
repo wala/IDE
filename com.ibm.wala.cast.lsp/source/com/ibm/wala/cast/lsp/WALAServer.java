@@ -595,7 +595,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				for(Function<T,String> a : analyses) {
 					String s = a.apply(scriptPositions.get(nearest));
 					if (s != null) {
-						sb.append("\n" + s);
+						sb.append(s + "\n");
 					}	
 				}
 			}
@@ -604,9 +604,9 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	
 	private String positionToString(Position pos) {
 		StringBuffer sb = new StringBuffer();
-		positionToString(pos, instructions, instructionAnalyses, sb);
 		positionToString(pos, values, valueAnalyses, sb);
-		sb.append("\n");
+		positionToString(pos, instructions, instructionAnalyses, sb);
+//		sb.append("\n");
 		return sb.toString();
 	}
 
