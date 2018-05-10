@@ -22,6 +22,7 @@ import java.net.Socket;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
@@ -34,6 +35,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 
+import org.eclipse.lsp4j.ClientCapabilities;
 import org.eclipse.lsp4j.CodeActionParams;
 import org.eclipse.lsp4j.CodeLens;
 import org.eclipse.lsp4j.CodeLensParams;
@@ -53,17 +55,21 @@ import org.eclipse.lsp4j.DocumentOnTypeFormattingParams;
 import org.eclipse.lsp4j.DocumentRangeFormattingParams;
 import org.eclipse.lsp4j.DocumentSymbolParams;
 import org.eclipse.lsp4j.Hover;
+import org.eclipse.lsp4j.HoverCapabilities;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializeResult;
 import org.eclipse.lsp4j.InitializedParams;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.MarkupContent;
+import org.eclipse.lsp4j.MarkupKind;
 import org.eclipse.lsp4j.MessageParams;
+import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.ReferenceParams;
 import org.eclipse.lsp4j.RenameParams;
 import org.eclipse.lsp4j.ServerCapabilities;
 import org.eclipse.lsp4j.SignatureHelp;
 import org.eclipse.lsp4j.SymbolInformation;
+import org.eclipse.lsp4j.TextDocumentClientCapabilities;
 import org.eclipse.lsp4j.TextDocumentPositionParams;
 import org.eclipse.lsp4j.TextDocumentSyncKind;
 import org.eclipse.lsp4j.TextEdit;
@@ -121,6 +127,38 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		return languageSources.get(language).add(file);
 	}
 	
+	// The information the client sent to use when it called initialize
+	private InitializeParams initializeParams = null;
+
+	private TextDocumentClientCapabilities getTextCapabilities() {
+		if(initializeParams == null) {
+			// really, this should be a warning/error
+			return null;
+		}
+		final ClientCapabilities caps = initializeParams.getCapabilities();
+		if(caps == null) {
+			return null;
+		}
+		return caps.getTextDocument();
+	}
+
+	// See MarkupKind for the allowed return values
+	public String getHoverFormatRequested() {
+		final TextDocumentClientCapabilities tcaps = getTextCapabilities();
+		if(tcaps == null) {
+			return MarkupKind.PLAINTEXT;
+		}
+		final HoverCapabilities hcaps = tcaps.getHover();
+		if(hcaps == null) {
+			return MarkupKind.PLAINTEXT;
+		}
+		final List<String> formats = hcaps.getContentFormat();
+		if(formats == null || formats.isEmpty()) {
+			return MarkupKind.PLAINTEXT;
+		}
+		return formats.get(0);
+	}
+
 	private <X> NavigableMap<Position, X> ensureUrlEntry(URL url, Map<URL, NavigableMap<Position, X>> map) {
 		if (! map.containsKey(url)) {
 			NavigableMap<Position, X> v = new TreeMap<Position,X>(new Comparator<Position>() {
@@ -273,6 +311,11 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	@Override
 	public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
+		if(this.initializeParams != null) {
+			// initialize should only be called once
+			client.logMessage(new MessageParams(MessageType.Error, "initialize called multiple times."));
+		}
+		this.initializeParams = params;
 		System.err.println("client sent " + params);
 		final ServerCapabilities caps = new ServerCapabilities();
 		caps.setHoverProvider(true);
@@ -379,13 +422,18 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					try {
 						Position lookupPos = lookupPos(position.getPosition(), new URI(position.getTextDocument().getUri()).toURL());
 						String msg = positionToString(lookupPos);
-						MarkupContent md = new MarkupContent();
-						md.setKind("markdown");
-						md.setValue(msg);
+						final String hoverMarkupKind = getHoverFormatRequested();
+						final boolean hoverKind = MarkupKind.MARKDOWN.equals(hoverMarkupKind);
 						Hover reply = new Hover();
-						reply.setContents(md);
-//						reply.setContents(Collections.singletonList(Either.forRight(str)));
-						return reply;
+						if(hoverKind) {
+							MarkupContent md = new MarkupContent();
+							md.setKind("markdown");
+							md.setValue(msg);
+							reply.setContents(md);
+						} else {
+							reply.setContents(Collections.singletonList(Either.forLeft(msg)));
+						}
+							return reply;
 					} catch (MalformedURLException | URISyntaxException e) {
 						assert false : e.toString();
 						return null;
