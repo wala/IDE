@@ -23,6 +23,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -77,6 +78,7 @@ import org.eclipse.lsp4j.services.LanguageServer;
 import org.eclipse.lsp4j.services.TextDocumentService;
 import org.eclipse.lsp4j.services.WorkspaceService;
 
+import com.ibm.wala.analysis.pointers.HeapGraph;
 import com.ibm.wala.cast.ir.ssa.AstIRFactory.AstIR;
 import com.ibm.wala.cast.ir.ssa.SSAConversion.CopyPropagationRecord;
 import com.ibm.wala.cast.ir.ssa.SSAConversion.SSAInformation;
@@ -89,6 +91,7 @@ import com.ibm.wala.client.AbstractAnalysisEngine;
 import com.ibm.wala.ipa.callgraph.CGNode;
 import com.ibm.wala.ipa.callgraph.CallGraph;
 import com.ibm.wala.ipa.callgraph.propagation.HeapModel;
+import com.ibm.wala.ipa.callgraph.propagation.InstanceFieldKey;
 import com.ibm.wala.ipa.callgraph.propagation.InstanceKey;
 import com.ibm.wala.ipa.callgraph.propagation.PointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PropagationCallGraphBuilder;
@@ -156,8 +159,38 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		ensureUrlEntry(url, instructions).put(p, v);
 	}
 
-	public void addValueAnalysis(Function<PointerKey,String> analysis) {
-		valueAnalyses.add(analysis);
+	private String traverse(HeapGraph<InstanceKey> H, Function<PointerKey,String> analysis, PointerKey ptr) {
+		String mine = analysis.apply(ptr);
+		if (mine != null && !"?".equals(mine)) {
+			return mine;
+		} else if (H.containsNode(ptr)) {
+			String all = "";
+			for(Iterator<?> Is = H.getSuccNodes(ptr); Is.hasNext(); ) {
+				for(Iterator<?> fields = H.getSuccNodes(Is.next()); fields.hasNext(); ) {
+					Object f = fields.next();
+					if (f instanceof InstanceFieldKey) {
+						InstanceFieldKey field = (InstanceFieldKey) f;
+						String sub = traverse(H, analysis, field);
+						if (sub != null && !"?".equals(sub)) {
+							String data = field.getField().getName() + ": " + sub + " ";
+							if (! all.contains(data)) {
+								all += data;
+							}
+						}
+					}
+				}
+			}
+			return "".equals(all)? null: all;
+		} else {
+			return null;
+		}
+	};
+
+	public void addValueAnalysis(HeapGraph<InstanceKey> H, Function<PointerKey,String> analysis) {
+		System.err.println(H);
+		valueAnalyses.add((PointerKey key) -> {
+			return traverse(H, analysis, key);
+		});
 	}
 
 	public void addInstructionAnalysis(Function<int[],String> analysis) {
@@ -229,12 +262,12 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		}
 	}
 	
-	public WALAServer(Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages2) {
-		this(languages2, null);
+	public WALAServer(Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages) {
+		this(languages, null);
 	}
 
-	public WALAServer(Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages2, Integer port) {
-		this.languages = languages2.apply(this);
+	public WALAServer(Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages, Integer port) {
+		this.languages = languages.apply(this);
 		this.serverPort = port;
 	}
 
@@ -530,7 +563,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		}
 		
 		Entry<Position, ?> next = entry;
-		while (next != null && within(next.getKey(), pos)) {
+		while (next != null && within(next.getKey(), pos) && next.getKey().getLastCol() <= entry.getKey().getLastCol()) {
 			entry = next;
 			next = scriptPositions.higherEntry(entry.getKey());
 		}
@@ -563,11 +596,11 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	}
 
 	public String toString() {
-		StringBuffer sb = new StringBuffer("WALA Server:\n");
-		for(URL script : instructions.keySet()) {
+		StringBuffer sb = new StringBuffer("WALA Server: ");
+		for(URL script : values.keySet()) {
 			sb.append(script + "\n");
 			for(Position pos : values.get(script).keySet()) {
-				sb.append(positionToString(pos));
+				sb.append(pos + ": " + positionToString(pos));
 			}
 		}
 		return sb.toString();
