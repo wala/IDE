@@ -90,6 +90,7 @@ import com.ibm.wala.cast.ir.ssa.SSAConversion.CopyPropagationRecord;
 import com.ibm.wala.cast.ir.ssa.SSAConversion.SSAInformation;
 import com.ibm.wala.cast.loader.AstMethod;
 import com.ibm.wala.cast.tree.CAstSourcePositionMap.Position;
+import com.ibm.wala.cast.util.SourceBuffer;
 import com.ibm.wala.classLoader.IMethod;
 import com.ibm.wala.classLoader.Module;
 import com.ibm.wala.classLoader.SourceURLModule;
@@ -637,6 +638,11 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	
 	private String positionToString(Position pos) {
 		StringBuffer sb = new StringBuffer();
+		try {
+			sb.append(new SourceBuffer(getNearest(values.get(pos.getURL()), pos)).toString());
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 		positionToString(pos, instructions, instructionAnalyses, sb);
 		positionToString(pos, values, valueAnalyses, sb);
 		sb.append("\n");
