@@ -599,16 +599,22 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		return (a.getFirstLine() < b.getFirstLine() ||
 				(a.getFirstLine() == b.getFirstLine() &&
 				 a.getFirstCol() <= b.getFirstCol())) 
-				&&
-				(a.getLastLine() > a.getLastLine() ||
-				 (a.getLastLine() == b.getLastLine() &&
-				  a.getLastCol() >= b.getLastCol()));
+			   &&
+			   (a.getLastLine() > a.getLastLine() ||
+				(a.getLastLine() == b.getLastLine() &&
+				 a.getLastCol() >= b.getLastCol()));
 	}
 				 
 	private Position getNearest(NavigableMap<Position, ?> scriptPositions, Position pos) {
 		Entry<Position, ?> entry = scriptPositions.floorEntry(pos);
 		if (entry == null) {
 			return null;
+		}
+		
+		Entry<Position, ?> prev = entry;
+		while (prev != null && within(entry.getKey(), prev.getKey()) && prev.getKey().getLastCol() >= pos.getFirstCol()) {
+			entry = prev;
+			prev = scriptPositions.lowerEntry(entry.getKey());
 		}
 		
 		Entry<Position, ?> next = entry;
