@@ -25,6 +25,7 @@ import java.net.URL;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -34,6 +35,7 @@ import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
+import java.util.function.Supplier;
 
 import org.eclipse.lsp4j.ClientCapabilities;
 import org.eclipse.lsp4j.CodeActionParams;
@@ -64,11 +66,13 @@ import org.eclipse.lsp4j.MarkupContent;
 import org.eclipse.lsp4j.MarkupKind;
 import org.eclipse.lsp4j.MessageParams;
 import org.eclipse.lsp4j.MessageType;
+import org.eclipse.lsp4j.Range;
 import org.eclipse.lsp4j.ReferenceParams;
 import org.eclipse.lsp4j.RenameParams;
 import org.eclipse.lsp4j.ServerCapabilities;
 import org.eclipse.lsp4j.SignatureHelp;
 import org.eclipse.lsp4j.SymbolInformation;
+import org.eclipse.lsp4j.SymbolKind;
 import org.eclipse.lsp4j.TextDocumentClientCapabilities;
 import org.eclipse.lsp4j.TextDocumentPositionParams;
 import org.eclipse.lsp4j.TextDocumentSyncKind;
@@ -88,9 +92,11 @@ import com.ibm.wala.analysis.pointers.HeapGraph;
 import com.ibm.wala.cast.ir.ssa.AstIRFactory.AstIR;
 import com.ibm.wala.cast.ir.ssa.SSAConversion.CopyPropagationRecord;
 import com.ibm.wala.cast.ir.ssa.SSAConversion.SSAInformation;
+import com.ibm.wala.cast.loader.AstFunctionClass;
 import com.ibm.wala.cast.loader.AstMethod;
 import com.ibm.wala.cast.tree.CAstSourcePositionMap.Position;
 import com.ibm.wala.cast.util.SourceBuffer;
+import com.ibm.wala.classLoader.IClass;
 import com.ibm.wala.classLoader.IMethod;
 import com.ibm.wala.classLoader.Module;
 import com.ibm.wala.classLoader.SourceURLModule;
@@ -116,6 +122,8 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	private final Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>> languages;
 	
 	private final Map<String, Set<Module>> languageSources = HashMapFactory.make();
+	
+	private final Map<String, Map<String, SymbolInformation>> documentSymbols = HashMapFactory.make();
 	
 	private final Set<Function<PointerKey,String>> valueAnalyses = HashSetFactory.make();
 	private final Set<Function<int[],String>> instructionAnalyses = HashSetFactory.make();
@@ -245,6 +253,23 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		}
 	}
 	
+	private org.eclipse.lsp4j.Position positionFromWALA(Position walaCodePosition, Supplier<Integer> line, Supplier<Integer> column) {
+		org.eclipse.lsp4j.Position codeStart = new org.eclipse.lsp4j.Position();
+		codeStart.setLine(line.get());
+		codeStart.setCharacter(column.get());
+		return codeStart;
+	}
+	
+	private Location locationFromWALA(Position walaCodePosition) {
+		Location codeLocation = new Location();
+		codeLocation.setUri(walaCodePosition.getURL().toString());
+		Range codeRange = new Range();
+		codeRange.setStart(positionFromWALA(walaCodePosition, walaCodePosition::getFirstLine, walaCodePosition::getFirstCol));
+		codeRange.setEnd(positionFromWALA(walaCodePosition, walaCodePosition::getLastLine, walaCodePosition::getLastCol));
+		codeLocation.setRange(codeRange);
+		return codeLocation;
+	}
+	
 	public void analyze(String language) {
 		try {
 			AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?> engine = languages.apply(language);
@@ -255,6 +280,25 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			CallGraph CG = cgBuilder.getCallGraph();
 			HeapModel H = cgBuilder.getPointerAnalysis().getHeapModel();
 
+			for(IClass cls : CG.getClassHierarchy()) {
+				if (cls instanceof AstFunctionClass) {
+					AstMethod code = ((AstFunctionClass)cls).getCodeBody();
+					Position sourcePosition = code.getSourcePosition();
+					if (sourcePosition != null) {
+					SymbolInformation codeSymbol = new SymbolInformation();
+					codeSymbol.setKind(SymbolKind.Function);
+					codeSymbol.setName(cls.getName().toString());
+					codeSymbol.setLocation(locationFromWALA(sourcePosition));
+					
+					String document = sourcePosition.getURL().toString();
+					if (! documentSymbols.containsKey(document)) {
+						documentSymbols.put(document, HashMapFactory.make());
+					}
+					documentSymbols.get(document).put(cls.getName().toString(), codeSymbol);
+					}
+				}
+			}
+			
 			CG.iterator().forEachRemaining((CGNode n) -> { 
 				IMethod M = n.getMethod();
 				if (M instanceof AstMethod) {
@@ -469,8 +513,14 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public CompletableFuture<List<? extends SymbolInformation>> documentSymbol(DocumentSymbolParams params) {
-				// TODO Auto-generated method stub
-				return null;
+				return CompletableFuture.supplyAsync(() -> {
+					String document = params.getTextDocument().getUri();
+					if (! documentSymbols.containsKey(document)) {
+						return Collections.emptyList();
+					} else {
+						return new LinkedList<SymbolInformation>(documentSymbols.get(document).values());
+					}
+				});
 			}
 
 			@Override
