@@ -638,16 +638,26 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	
 	private String positionToString(Position pos) {
 		StringBuffer sb = new StringBuffer();
+		positionToString(pos, values, valueAnalyses, sb);
+		positionToString(pos, instructions, instructionAnalyses, sb);
+		if(sb.length() == 0) {
+			return "";
+		}
+
+		String name = "";
 		try {
-			sb.append(new SourceBuffer(getNearest(values.get(pos.getURL()), pos)).toString());
+			final String hoverMarkupKind = this.getHoverFormatRequested();
+			final boolean useMarkdown = MarkupKind.MARKDOWN.equals(hoverMarkupKind);
+			name = new SourceBuffer(getNearest(values.get(pos.getURL()), pos)).toString() + "\n";
+			if(useMarkdown) {
+				name = "```python\n" + name + "```\n";
+			}
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-		positionToString(pos, instructions, instructionAnalyses, sb);
-		positionToString(pos, values, valueAnalyses, sb);
-		positionToString(pos, instructions, instructionAnalyses, sb);
+
 //		sb.append("\n");
-		return sb.toString();
+		return name + sb.toString();
 	}
 
 	public String toString() {
