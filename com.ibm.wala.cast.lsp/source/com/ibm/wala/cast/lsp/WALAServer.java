@@ -22,6 +22,7 @@ import java.net.Socket;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -36,6 +37,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import org.eclipse.lsp4j.ClientCapabilities;
 import org.eclipse.lsp4j.CodeActionParams;
@@ -127,7 +129,9 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	
 	private final Set<Function<PointerKey,String>> valueAnalyses = HashSetFactory.make();
 	private final Set<Function<int[],String>> instructionAnalyses = HashSetFactory.make();
-	
+
+	private Function<int[],Set<Position>> findDefinitionAnalysis = null;
+
 	public boolean addSource(String language, Module file) {
 		if (! languageSources.containsKey(language)) {
 			languageSources.put(language, HashSetFactory.make());
@@ -244,6 +248,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		instructionAnalyses.add(analysis);
 	}
 
+	public void setFindDefinitionAnalysis(Function<int[],Set<Position>> analysis) {
+		this.findDefinitionAnalysis = analysis;
+	}
+
 	public PointerKey getValue(Position p) {
 		NavigableMap<Position, PointerKey> m = values.get(p.getURL());
 		if (m.containsKey(p)) {
@@ -269,6 +277,20 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		codeLocation.setRange(codeRange);
 		return codeLocation;
 	}
+
+	static URI getPositionUri(Position pos) {
+		URL url = pos.getURL();
+		try {
+			URI uri = url.toURI();
+			if(uri.getScheme().equalsIgnoreCase("file")) {
+				uri = Paths.get(uri).toUri();
+			}
+			return uri;
+		} catch(URISyntaxException e) {
+			System.err.println("Error converting URL " + url + " to a URI:" + e.getMessage());
+			return null;
+		}
+	}
 	
 	public void analyze(String language) {
 		try {
@@ -285,16 +307,20 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					AstMethod code = ((AstFunctionClass)cls).getCodeBody();
 					Position sourcePosition = code.getSourcePosition();
 					if (sourcePosition != null) {
-					SymbolInformation codeSymbol = new SymbolInformation();
-					codeSymbol.setKind(SymbolKind.Function);
-					codeSymbol.setName(cls.getName().toString());
-					codeSymbol.setLocation(locationFromWALA(sourcePosition));
-					
-					String document = sourcePosition.getURL().toString();
-					if (! documentSymbols.containsKey(document)) {
-						documentSymbols.put(document, HashMapFactory.make());
-					}
-					documentSymbols.get(document).put(cls.getName().toString(), codeSymbol);
+						SymbolInformation codeSymbol = new SymbolInformation();
+						codeSymbol.setKind(SymbolKind.Function);
+						codeSymbol.setName(cls.getName().toString());
+						codeSymbol.setLocation(locationFromWALA(sourcePosition));
+						
+						
+						URI documentURI = getPositionUri(sourcePosition);
+						if(documentURI != null) {
+							final String document = documentURI.toString();
+							if (! documentSymbols.containsKey(document)) {
+								documentSymbols.put(document, HashMapFactory.make());
+							}
+							documentSymbols.get(document).put(cls.getName().toString(), codeSymbol);
+						}
 					}
 				}
 			}
@@ -365,6 +391,8 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		final ServerCapabilities caps = new ServerCapabilities();
 		caps.setHoverProvider(true);
 		caps.setTextDocumentSync(TextDocumentSyncKind.Full);
+		caps.setDocumentSymbolProvider(true);
+		caps.setDefinitionProvider(true);
 		InitializeResult v = new InitializeResult(caps);
 		System.err.println("server responding with " + v);
 		return CompletableFuture.completedFuture(v);
@@ -494,9 +522,41 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public CompletableFuture<List<? extends Location>> definition(TextDocumentPositionParams position) {
-				// TODO Auto-generated method stub
-				return null;
-			}
+				return CompletableFuture.supplyAsync(() -> {
+				try {
+					if (findDefinitionAnalysis == null) {
+						return null;
+					}
+					Position pos = lookupPos(position.getPosition(), new URI(position.getTextDocument().getUri()).toURL());
+
+					if (instructions.containsKey(pos.getURL())) {
+						NavigableMap<Position, int[]> scriptPositions = instructions.get(pos.getURL());
+						Position nearest = getNearest(scriptPositions, pos);
+						if(nearest == null) {
+							return null;
+						}
+						Set<Position> locations = findDefinitionAnalysis.apply(scriptPositions.get(nearest));
+						if(locations == null || locations.isEmpty()) {
+							return null;
+						}
+						List<Location> locs = locations.stream()
+						.filter(x -> x != null)
+						.map(x -> locationFromWALA(x))
+						.collect(Collectors.toList());
+						if(locs == null | locs.isEmpty()) {
+							return null;
+						} else {
+							return locs;
+						}
+					} else {
+						return null;
+					}
+				} catch (MalformedURLException | URISyntaxException e) {
+					assert false : e.toString();
+					return null;
+				}
+			});
+		}
 
 			@Override
 			public CompletableFuture<List<? extends Location>> references(ReferenceParams params) {
