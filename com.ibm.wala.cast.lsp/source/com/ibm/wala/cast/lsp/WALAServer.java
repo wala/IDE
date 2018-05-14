@@ -109,6 +109,7 @@ import com.ibm.wala.ipa.callgraph.propagation.InstanceKey;
 import com.ibm.wala.ipa.callgraph.propagation.PointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PropagationCallGraphBuilder;
 import com.ibm.wala.ssa.SSAInstruction;
+import com.ibm.wala.types.MethodReference;
 import com.ibm.wala.util.CancelException;
 import com.ibm.wala.util.CancelRuntimeException;
 import com.ibm.wala.util.collections.HashMapFactory;
@@ -234,7 +235,6 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	};
 
 	public void addValueAnalysis(HeapGraph<InstanceKey> H, Function<PointerKey,String> analysis) {
-		System.err.println(H);
 		valueAnalyses.add((PointerKey key) -> {
 			return traverse(H, analysis, key);
 		});
@@ -270,6 +270,18 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		return codeLocation;
 	}
 	
+	private class WalaSymbolInformation extends SymbolInformation {
+		private final MethodReference function;
+
+		public WalaSymbolInformation(MethodReference function) {
+			this.function = function;
+		}
+
+		public MethodReference getFunction() {
+			return function;
+		}	
+	}
+	
 	public void analyze(String language) {
 		try {
 			AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?> engine = languages.apply(language);
@@ -285,16 +297,16 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					AstMethod code = ((AstFunctionClass)cls).getCodeBody();
 					Position sourcePosition = code.getSourcePosition();
 					if (sourcePosition != null) {
-					SymbolInformation codeSymbol = new SymbolInformation();
-					codeSymbol.setKind(SymbolKind.Function);
-					codeSymbol.setName(cls.getName().toString());
-					codeSymbol.setLocation(locationFromWALA(sourcePosition));
-					
-					String document = sourcePosition.getURL().toString();
-					if (! documentSymbols.containsKey(document)) {
-						documentSymbols.put(document, HashMapFactory.make());
-					}
-					documentSymbols.get(document).put(cls.getName().toString(), codeSymbol);
+						SymbolInformation codeSymbol = new WalaSymbolInformation(code.getReference());
+						codeSymbol.setKind(SymbolKind.Function);
+						codeSymbol.setName(cls.getName().toString());
+						codeSymbol.setLocation(locationFromWALA(sourcePosition));
+
+						String document = sourcePosition.getURL().toString();
+						if (! documentSymbols.containsKey(document)) {
+							documentSymbols.put(document, HashMapFactory.make());
+						}
+						documentSymbols.get(document).put(cls.getName().toString(), codeSymbol);
 					}
 				}
 			}
@@ -531,8 +543,22 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public CompletableFuture<List<? extends CodeLens>> codeLens(CodeLensParams params) {
-				// TODO Auto-generated method stub
-				return null;
+				return CompletableFuture.supplyAsync(() -> {
+					List<CodeLens> result = new LinkedList<CodeLens>();
+					String document = params.getTextDocument().getUri();
+					for(SymbolInformation sym : documentSymbols.get(document).values()) {
+						for(String command : new String[] {"types", "calls"}) {
+							CodeLens cl = new CodeLens();
+							Command cmd = new Command();
+							cmd.setCommand(command);
+							cl.setCommand(cmd);
+							cl.setData(sym);
+							cl.setRange(sym.getLocation().getRange());
+							result.add(cl);
+						}
+					}
+					return result;
+				});
 			}
 
 			@Override
