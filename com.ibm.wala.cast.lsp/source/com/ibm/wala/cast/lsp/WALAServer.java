@@ -22,6 +22,8 @@ import java.net.Socket;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -36,15 +38,18 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import org.eclipse.lsp4j.ClientCapabilities;
 import org.eclipse.lsp4j.CodeActionParams;
 import org.eclipse.lsp4j.CodeLens;
+import org.eclipse.lsp4j.CodeLensOptions;
 import org.eclipse.lsp4j.CodeLensParams;
 import org.eclipse.lsp4j.Command;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionList;
 import org.eclipse.lsp4j.CompletionParams;
+import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DidChangeConfigurationParams;
 import org.eclipse.lsp4j.DidChangeTextDocumentParams;
 import org.eclipse.lsp4j.DidChangeWatchedFilesParams;
@@ -56,6 +61,8 @@ import org.eclipse.lsp4j.DocumentHighlight;
 import org.eclipse.lsp4j.DocumentOnTypeFormattingParams;
 import org.eclipse.lsp4j.DocumentRangeFormattingParams;
 import org.eclipse.lsp4j.DocumentSymbolParams;
+import org.eclipse.lsp4j.ExecuteCommandOptions;
+import org.eclipse.lsp4j.ExecuteCommandParams;
 import org.eclipse.lsp4j.Hover;
 import org.eclipse.lsp4j.HoverCapabilities;
 import org.eclipse.lsp4j.InitializeParams;
@@ -66,6 +73,7 @@ import org.eclipse.lsp4j.MarkupContent;
 import org.eclipse.lsp4j.MarkupKind;
 import org.eclipse.lsp4j.MessageParams;
 import org.eclipse.lsp4j.MessageType;
+import org.eclipse.lsp4j.PublishDiagnosticsParams;
 import org.eclipse.lsp4j.Range;
 import org.eclipse.lsp4j.ReferenceParams;
 import org.eclipse.lsp4j.RenameParams;
@@ -88,6 +96,7 @@ import org.eclipse.lsp4j.services.LanguageServer;
 import org.eclipse.lsp4j.services.TextDocumentService;
 import org.eclipse.lsp4j.services.WorkspaceService;
 
+import com.google.gson.JsonPrimitive;
 import com.ibm.wala.analysis.pointers.HeapGraph;
 import com.ibm.wala.cast.ir.ssa.AstIRFactory.AstIR;
 import com.ibm.wala.cast.ir.ssa.SSAConversion.CopyPropagationRecord;
@@ -95,8 +104,10 @@ import com.ibm.wala.cast.ir.ssa.SSAConversion.SSAInformation;
 import com.ibm.wala.cast.loader.AstFunctionClass;
 import com.ibm.wala.cast.loader.AstMethod;
 import com.ibm.wala.cast.tree.CAstSourcePositionMap.Position;
+import com.ibm.wala.cast.types.AstMethodReference;
 import com.ibm.wala.cast.util.SourceBuffer;
 import com.ibm.wala.classLoader.IClass;
+import com.ibm.wala.classLoader.IClassLoader;
 import com.ibm.wala.classLoader.IMethod;
 import com.ibm.wala.classLoader.Module;
 import com.ibm.wala.classLoader.SourceURLModule;
@@ -106,10 +117,14 @@ import com.ibm.wala.ipa.callgraph.CallGraph;
 import com.ibm.wala.ipa.callgraph.propagation.HeapModel;
 import com.ibm.wala.ipa.callgraph.propagation.InstanceFieldKey;
 import com.ibm.wala.ipa.callgraph.propagation.InstanceKey;
+import com.ibm.wala.ipa.callgraph.propagation.LocalPointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PropagationCallGraphBuilder;
+import com.ibm.wala.ssa.DefUse;
+import com.ibm.wala.ssa.IR;
 import com.ibm.wala.ssa.SSAInstruction;
 import com.ibm.wala.types.MethodReference;
+import com.ibm.wala.types.TypeReference;
 import com.ibm.wala.util.CancelException;
 import com.ibm.wala.util.CancelRuntimeException;
 import com.ibm.wala.util.collections.HashMapFactory;
@@ -123,12 +138,17 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	private final Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>> languages;
 	
 	private final Map<String, Set<Module>> languageSources = HashMapFactory.make();
-	
-	private final Map<String, Map<String, SymbolInformation>> documentSymbols = HashMapFactory.make();
+
+	private final Map<String, CallGraph> languageBuilders = HashMapFactory.make();
+
+	private final Map<String, Map<String, WalaSymbolInformation>> documentSymbols = HashMapFactory.make();
 	
 	private final Set<Function<PointerKey,String>> valueAnalyses = HashSetFactory.make();
+	private final Set<Map<PointerKey,String>> valueErrors = HashSetFactory.make();
 	private final Set<Function<int[],String>> instructionAnalyses = HashSetFactory.make();
-	
+
+	private Function<int[],Set<Position>> findDefinitionAnalysis = null;
+
 	public boolean addSource(String language, Module file) {
 		if (! languageSources.containsKey(language)) {
 			languageSources.put(language, HashSetFactory.make());
@@ -234,6 +254,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		}
 	};
 
+	public void addValueErrors(Map<PointerKey,String> errors) {
+		valueErrors.add(errors);
+	}
+	
 	public void addValueAnalysis(HeapGraph<InstanceKey> H, Function<PointerKey,String> analysis) {
 		valueAnalyses.add((PointerKey key) -> {
 			return traverse(H, analysis, key);
@@ -242,6 +266,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	public void addInstructionAnalysis(Function<int[],String> analysis) {
 		instructionAnalyses.add(analysis);
+	}
+
+	public void setFindDefinitionAnalysis(Function<int[],Set<Position>> analysis) {
+		this.findDefinitionAnalysis = analysis;
 	}
 
 	public PointerKey getValue(Position p) {
@@ -269,6 +297,20 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		codeLocation.setRange(codeRange);
 		return codeLocation;
 	}
+
+	static URI getPositionUri(Position pos) {
+		URL url = pos.getURL();
+		try {
+			URI uri = url.toURI();
+			if(uri.getScheme().equalsIgnoreCase("file")) {
+				uri = Paths.get(uri).toUri();
+			}
+			return uri;
+		} catch(URISyntaxException e) {
+			System.err.println("Error converting URL " + url + " to a URI:" + e.getMessage());
+			return null;
+		}
+	}
 	
 	private class WalaSymbolInformation extends SymbolInformation {
 		private final MethodReference function;
@@ -280,6 +322,11 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		public MethodReference getFunction() {
 			return function;
 		}	
+		
+		public String toString() {
+			return super.toString() + "(" + getFunction() + ")";
+			
+		}
 	}
 	
 	public void analyze(String language) {
@@ -297,16 +344,20 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					AstMethod code = ((AstFunctionClass)cls).getCodeBody();
 					Position sourcePosition = code.getSourcePosition();
 					if (sourcePosition != null) {
-						SymbolInformation codeSymbol = new WalaSymbolInformation(code.getReference());
+						WalaSymbolInformation codeSymbol = new WalaSymbolInformation(code.getReference());
 						codeSymbol.setKind(SymbolKind.Function);
 						codeSymbol.setName(cls.getName().toString());
 						codeSymbol.setLocation(locationFromWALA(sourcePosition));
-
-						String document = sourcePosition.getURL().toString();
-						if (! documentSymbols.containsKey(document)) {
-							documentSymbols.put(document, HashMapFactory.make());
+						
+						
+						URI documentURI = getPositionUri(sourcePosition);
+						if(documentURI != null) {
+							final String document = documentURI.toString();
+							if (! documentSymbols.containsKey(document)) {
+								documentSymbols.put(document, HashMapFactory.make());
+							}
+							documentSymbols.get(document).put(cls.getName().toString(), codeSymbol);
 						}
-						documentSymbols.get(document).put(cls.getName().toString(), codeSymbol);
 					}
 				}
 			}
@@ -352,6 +403,38 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			engine.performAnalysis(cgBuilder);
 
+			languageBuilders.put(language, CG);
+			
+			Map<String, List<Diagnostic>> diags = HashMapFactory.make();
+			for(Map<PointerKey,String> ve : valueErrors) {
+				for(Map.Entry<PointerKey,String> e : ve.entrySet()) {
+					if (e.getKey() instanceof LocalPointerKey) {
+						LocalPointerKey k = (LocalPointerKey) e.getKey();
+						SSAInstruction inst = k.getNode().getDU().getDef(k.getValueNumber());
+						if (inst != null) {
+							Diagnostic d = new Diagnostic();
+							d.setMessage(e.getValue());
+							Position pos = ((AstMethod)k.getNode().getMethod()).debugInfo().getInstructionPosition(inst.iindex);
+							Location loc = locationFromWALA(pos);
+							d.setRange(loc.getRange());
+							
+							String uri = loc.getUri();
+							if (! diags.containsKey(uri)) {
+								diags.put(uri, new LinkedList<>());
+							}
+							diags.get(uri).add(d);
+						}
+					}
+				}
+			}
+
+			for(Map.Entry<String,List<Diagnostic>> d : diags.entrySet()) {
+				PublishDiagnosticsParams pdp = new PublishDiagnosticsParams();
+				pdp.setUri(d.getKey());
+				pdp.setDiagnostics(d.getValue());
+				client.publishDiagnostics(pdp);
+			}
+
 		} catch (IOException | IllegalArgumentException | CancelException e) {
 
 		}
@@ -377,6 +460,14 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		final ServerCapabilities caps = new ServerCapabilities();
 		caps.setHoverProvider(true);
 		caps.setTextDocumentSync(TextDocumentSyncKind.Full);
+		CodeLensOptions cl = new CodeLensOptions();
+		cl.setResolveProvider(false);
+		caps.setCodeLensProvider(cl);
+		caps.setDocumentSymbolProvider(true);
+		caps.setDefinitionProvider(true);
+		ExecuteCommandOptions exec = new ExecuteCommandOptions();
+		exec.setCommands(Arrays.asList("calls", "types"));
+		caps.setExecuteCommandProvider(exec);
 		InitializeResult v = new InitializeResult(caps);
 		System.err.println("server responding with " + v);
 		return CompletableFuture.completedFuture(v);
@@ -506,9 +597,41 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public CompletableFuture<List<? extends Location>> definition(TextDocumentPositionParams position) {
-				// TODO Auto-generated method stub
-				return null;
-			}
+				return CompletableFuture.supplyAsync(() -> {
+				try {
+					if (findDefinitionAnalysis == null) {
+						return null;
+					}
+					Position pos = lookupPos(position.getPosition(), new URI(position.getTextDocument().getUri()).toURL());
+
+					if (instructions.containsKey(pos.getURL())) {
+						NavigableMap<Position, int[]> scriptPositions = instructions.get(pos.getURL());
+						Position nearest = getNearest(scriptPositions, pos);
+						if(nearest == null) {
+							return null;
+						}
+						Set<Position> locations = findDefinitionAnalysis.apply(scriptPositions.get(nearest));
+						if(locations == null || locations.isEmpty()) {
+							return null;
+						}
+						List<Location> locs = locations.stream()
+						.filter(x -> x != null)
+						.map(x -> locationFromWALA(x))
+						.collect(Collectors.toList());
+						if(locs == null | locs.isEmpty()) {
+							return null;
+						} else {
+							return locs;
+						}
+					} else {
+						return null;
+					}
+				} catch (MalformedURLException | URISyntaxException e) {
+					assert false : e.toString();
+					return null;
+				}
+			});
+		}
 
 			@Override
 			public CompletableFuture<List<? extends Location>> references(ReferenceParams params) {
@@ -530,7 +653,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					if (! documentSymbols.containsKey(document)) {
 						return Collections.emptyList();
 					} else {
-						return new LinkedList<SymbolInformation>(documentSymbols.get(document).values());
+						return new LinkedList<WalaSymbolInformation>(documentSymbols.get(document).values());
 					}
 				});
 			}
@@ -546,11 +669,12 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				return CompletableFuture.supplyAsync(() -> {
 					List<CodeLens> result = new LinkedList<CodeLens>();
 					String document = params.getTextDocument().getUri();
-					for(SymbolInformation sym : documentSymbols.get(document).values()) {
+					for(WalaSymbolInformation sym : documentSymbols.get(document).values()) {
 						for(String command : new String[] {"types", "calls"}) {
 							CodeLens cl = new CodeLens();
 							Command cmd = new Command();
 							cmd.setCommand(command);
+							cmd.setArguments(Arrays.asList(sym.getFunction().getDeclaringClass().getName().toString()));
 							cl.setCommand(cmd);
 							cl.setData(sym);
 							cl.setRange(sym.getLocation().getRange());
@@ -606,8 +730,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public void didChange(DidChangeTextDocumentParams params) {
-				// TODO Auto-generated method stub
+				PublishDiagnosticsParams diagnostics = new PublishDiagnosticsParams();
+				diagnostics.setUri(params.getTextDocument().getUri());
 				
+				client.publishDiagnostics(diagnostics);
 			}
 
 			@Override
@@ -642,6 +768,67 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		};
 	}
 
+	private CompletableFuture<Object> typesCommand(ExecuteCommandParams params) {
+		return CompletableFuture.supplyAsync(() -> {
+			Set<String> result = HashSetFactory.make();
+			for(CallGraph CG : languageBuilders.values()) {
+				for(IClassLoader loader : CG.getClassHierarchy().getLoaders()) {
+					String typeName = ((JsonPrimitive)params.getArguments().get(0)).getAsString();
+					MethodReference function = AstMethodReference.fnReference(TypeReference.findOrCreate(loader.getReference(), typeName));
+					for(CGNode n : CG.getNodes(function)) {
+						AstIR ir = (AstIR) n.getIR();
+						DefUse du = n.getDU();
+						for(int v = 1; v <= ir.getSymbolTable().getMaxValueNumber(); v++) {
+							if (du.getUses(v).hasNext()) {
+								SSAInstruction inst = du.getUses(v).next();
+								if (inst.iindex != -1 ) {
+									for(int i = 0; i < inst.getNumberOfUses(); i++) {
+										if (inst.getUse(i) == v) {
+											Position pos = ir.getMethod().debugInfo().getOperandPosition(inst.iindex, i);
+											if (pos != null) { 
+												result.add(positionToString(pos));
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			return result;
+		});
+	}
+					
+	private CompletableFuture<Object> callersCommand(ExecuteCommandParams params) {
+		return CompletableFuture.supplyAsync(() -> {
+			Set<Either<String,SymbolInformation>> result = HashSetFactory.make();
+			for(CallGraph CG : languageBuilders.values()) {
+				for(IClassLoader loader : CG.getClassHierarchy().getLoaders()) {
+					String typeName = ((JsonPrimitive)params.getArguments().get(0)).getAsString();
+					MethodReference function = AstMethodReference.fnReference(TypeReference.findOrCreate(loader.getReference(), typeName));
+					for(CGNode n : CG.getNodes(function)) {
+						CG.getPredNodes(n).forEachRemaining((CGNode caller) -> {
+							IClass functionType = caller.getMethod().getDeclaringClass();
+							String functionName = functionType.getName().toString();
+							if (functionType instanceof AstFunctionClass) {
+								AstFunctionClass fun = (AstFunctionClass) functionType;
+								String file = fun.getSourcePosition().getURL().toString();
+								if (documentSymbols.containsKey(file)) {
+									SymbolInformation fs = documentSymbols.get(file).get(functionName);
+									result.add(Either.forRight(fs));
+									return;
+								}
+							}
+							result.add(Either.forLeft(functionName));
+						});
+					}
+				}
+			}
+			return result;
+		});
+	}
+
 	@Override
 	public WorkspaceService getWorkspaceService() {
 		return new WorkspaceService() {
@@ -651,6 +838,12 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				// TODO Auto-generated method stub
 				return null;
 			}
+
+			@Override
+			public CompletableFuture<Object> executeCommand(ExecuteCommandParams params) {
+				return "calls".equals(params.getCommand())? callersCommand(params) : typesCommand(params);
+			}
+
 
 			@Override
 			public void didChangeConfiguration(DidChangeConfigurationParams params) {
