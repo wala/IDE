@@ -682,8 +682,16 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public CompletableFuture<List<? extends Command>> codeAction(CodeActionParams params) {
-				// TODO Auto-generated method stub
-				return null;
+				if (params.getContext().getDiagnostics().toString().contains("possible fix:")) {
+					return CompletableFuture.supplyAsync(() -> {
+						Command fix = new Command();
+						fix.setCommand("fix");
+						fix.setArguments(Arrays.asList(params.getContext().getDiagnostics()));
+						return Collections.singletonList(fix);
+					});
+				} else {
+					return CompletableFuture.completedFuture(Collections.emptyList());
+				}
 			}
 
 			@Override
