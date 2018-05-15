@@ -694,11 +694,17 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					for(WalaSymbolInformation sym : documentSymbols.get(document).values()) {
 						for(String command : new String[] {"types", "calls"}) {
 							CodeLens cl = new CodeLens();
-							Command cmd = new Command();
-							cmd.setCommand(command);
+							final String title;
+							if(command.equals("types")) {
+								title = "type";
+							} else if(command.equals("calls")) {
+								title = "call sites";
+							} else {
+								continue;
+							}
+							Command cmd = new Command(title, command);
 							cmd.setArguments(Arrays.asList(sym.getFunction().getDeclaringClass().getName().toString()));
 							cl.setCommand(cmd);
-							cl.setData(sym);
 							cl.setRange(sym.getLocation().getRange());
 							result.add(cl);
 						}
