@@ -425,7 +425,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			
 			Map<String, List<Diagnostic>> diags = HashMapFactory.make();
 			for(Map<PointerKey,String> ve : valueErrors) {
-				for(Map.Entry<PointerKey,String> e : ve.entrySet()) {
+				errors: for(Map.Entry<PointerKey,String> e : ve.entrySet()) {
 					if (e.getKey() instanceof LocalPointerKey) {
 						LocalPointerKey k = (LocalPointerKey) e.getKey();
 						SSAInstruction inst = k.getNode().getDU().getDef(k.getValueNumber());
@@ -439,6 +439,11 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 							String uri = loc.getUri();
 							if (! diags.containsKey(uri)) {
 								diags.put(uri, new LinkedList<>());
+							}
+							for(Diagnostic od : diags.get(uri)) {
+								if (od.toString().equals(d.toString())) {
+									continue errors;
+								}
 							}
 							diags.get(uri).add(d);
 						}
