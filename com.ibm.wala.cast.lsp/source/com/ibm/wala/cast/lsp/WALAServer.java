@@ -147,7 +147,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	private final Map<String, Map<String, WalaSymbolInformation>> documentSymbols = HashMapFactory.make();
 	
 	private final Set<Function<PointerKey,String>> valueAnalyses = HashSetFactory.make();
-	private final Set<Map<PointerKey,String>> valueErrors = HashSetFactory.make();
+	private final Set<Map<PointerKey,AnalysisError>> valueErrors = HashSetFactory.make();
 	private final Set<Function<int[],String>> instructionAnalyses = HashSetFactory.make();
 
 	private Function<int[],Set<Position>> findDefinitionAnalysis = null;
@@ -262,7 +262,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		}
 	};
 
-	public void addValueErrors(Map<PointerKey,String> errors) {
+	public void addValueErrors(Map<PointerKey,AnalysisError> errors) {
 		valueErrors.add(errors);
 	}
 	
@@ -425,14 +425,15 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			languageBuilders.put(language, CG);
 			
 			Map<String, List<Diagnostic>> diags = HashMapFactory.make();
-			for(Map<PointerKey,String> ve : valueErrors) {
-				for(Map.Entry<PointerKey,String> e : ve.entrySet()) {
+			for(Map<PointerKey,AnalysisError> ve : valueErrors) {
+				for(Map.Entry<PointerKey,AnalysisError> e : ve.entrySet()) {
 					if (e.getKey() instanceof LocalPointerKey) {
 						LocalPointerKey k = (LocalPointerKey) e.getKey();
 						SSAInstruction inst = k.getNode().getDU().getDef(k.getValueNumber());
 						if (inst != null) {
 							Diagnostic d = new Diagnostic();
-							d.setMessage(e.getValue());
+							// Diagnostics do not currently support markdown
+							d.setMessage(e.getValue().toString(false));
 							Position pos = ((AstMethod)k.getNode().getMethod()).debugInfo().getInstructionPosition(inst.iindex);
 							Location loc = locationFromWALA(pos);
 							d.setRange(loc.getRange());
