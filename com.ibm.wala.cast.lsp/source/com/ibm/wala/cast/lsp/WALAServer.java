@@ -38,7 +38,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
-import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
 import org.eclipse.lsp4j.ClientCapabilities;
@@ -109,7 +108,6 @@ import com.ibm.wala.cast.types.AstMethodReference;
 import com.ibm.wala.cast.util.SourceBuffer;
 import com.ibm.wala.classLoader.IClass;
 import com.ibm.wala.classLoader.IClassLoader;
-import com.ibm.wala.classLoader.IField;
 import com.ibm.wala.classLoader.IMethod;
 import com.ibm.wala.classLoader.Module;
 import com.ibm.wala.classLoader.SourceURLModule;
@@ -130,7 +128,6 @@ import com.ibm.wala.util.CancelException;
 import com.ibm.wala.util.CancelRuntimeException;
 import com.ibm.wala.util.collections.HashMapFactory;
 import com.ibm.wala.util.collections.HashSetFactory;
-import com.ibm.wala.util.collections.Pair;
 
 public class WALAServer implements LanguageClientAware, LanguageServer {
 	private LanguageClient client;
@@ -146,7 +143,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	private final Map<String, Map<String, WalaSymbolInformation>> documentSymbols = HashMapFactory.make();
 	
 	private final Set<Function<PointerKey,String>> valueAnalyses = HashSetFactory.make();
-	private final Set<Map<PointerKey,String>> valueErrors = HashSetFactory.make();
+	private final Set<Map<PointerKey,AnalysisError>> valueErrors = HashSetFactory.make();
 	private final Set<Function<int[],String>> instructionAnalyses = HashSetFactory.make();
 
 	private Function<int[],Set<Position>> findDefinitionAnalysis = null;
@@ -261,7 +258,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		}
 	};
 
-	public void addValueErrors(Map<PointerKey,String> errors) {
+	public void addValueErrors(Map<PointerKey,AnalysisError> errors) {
 		valueErrors.add(errors);
 	}
 	
@@ -424,14 +421,15 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			languageBuilders.put(language, CG);
 			
 			Map<String, List<Diagnostic>> diags = HashMapFactory.make();
-			for(Map<PointerKey,String> ve : valueErrors) {
-				errors: for(Map.Entry<PointerKey,String> e : ve.entrySet()) {
+			for(Map<PointerKey,AnalysisError> ve : valueErrors) {
+				errors: for(Map.Entry<PointerKey,AnalysisError> e : ve.entrySet()) {
 					if (e.getKey() instanceof LocalPointerKey) {
 						LocalPointerKey k = (LocalPointerKey) e.getKey();
 						SSAInstruction inst = k.getNode().getDU().getDef(k.getValueNumber());
 						if (inst != null) {
 							Diagnostic d = new Diagnostic();
-							d.setMessage(e.getValue());
+							// Diagnostics do not currently support markdown
+							d.setMessage(e.getValue().toString(false));
 							Position pos = ((AstMethod)k.getNode().getMethod()).debugInfo().getInstructionPosition(inst.iindex);
 							Location loc = locationFromWALA(pos);
 							d.setRange(loc.getRange());
