@@ -121,7 +121,6 @@ import com.ibm.wala.ipa.callgraph.propagation.LocalPointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PropagationCallGraphBuilder;
 import com.ibm.wala.ssa.DefUse;
-import com.ibm.wala.ssa.IR;
 import com.ibm.wala.ssa.SSAInstruction;
 import com.ibm.wala.types.MethodReference;
 import com.ibm.wala.types.TypeReference;
@@ -417,7 +416,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 							Position pos = ((AstMethod)k.getNode().getMethod()).debugInfo().getInstructionPosition(inst.iindex);
 							Location loc = locationFromWALA(pos);
 							d.setRange(loc.getRange());
-							
+
 							String uri = loc.getUri();
 							if (! diags.containsKey(uri)) {
 								diags.put(uri, new LinkedList<>());
@@ -469,6 +468,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		exec.setCommands(Arrays.asList("calls", "types"));
 		caps.setExecuteCommandProvider(exec);
 		InitializeResult v = new InitializeResult(caps);
+		caps.setCodeActionProvider(true);
 		System.err.println("server responding with " + v);
 		return CompletableFuture.completedFuture(v);
 	}
