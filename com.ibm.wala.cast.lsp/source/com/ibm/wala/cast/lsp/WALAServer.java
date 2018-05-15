@@ -38,6 +38,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
 import org.eclipse.lsp4j.ClientCapabilities;
@@ -108,6 +109,7 @@ import com.ibm.wala.cast.types.AstMethodReference;
 import com.ibm.wala.cast.util.SourceBuffer;
 import com.ibm.wala.classLoader.IClass;
 import com.ibm.wala.classLoader.IClassLoader;
+import com.ibm.wala.classLoader.IField;
 import com.ibm.wala.classLoader.IMethod;
 import com.ibm.wala.classLoader.Module;
 import com.ibm.wala.classLoader.SourceURLModule;
@@ -128,6 +130,7 @@ import com.ibm.wala.util.CancelException;
 import com.ibm.wala.util.CancelRuntimeException;
 import com.ibm.wala.util.collections.HashMapFactory;
 import com.ibm.wala.util.collections.HashSetFactory;
+import com.ibm.wala.util.collections.Pair;
 
 public class WALAServer implements LanguageClientAware, LanguageServer {
 	private LanguageClient client;
@@ -226,9 +229,14 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		ensureUrlEntry(url, instructions).put(p, v);
 	}
 
-	private String traverse(HeapGraph<InstanceKey> H, Function<PointerKey,String> analysis, PointerKey ptr) {
+
+	private String traverse(
+		HeapGraph<InstanceKey> H, 
+		Function<PointerKey,String> analysis,
+//		Collector<Pair<IField,R>, A, R> collector,
+		PointerKey ptr) {
 		String mine = analysis.apply(ptr);
-		if (mine != null && !"?".equals(mine)) {
+		if (mine != null) {
 			return mine;
 		} else if (H.containsNode(ptr)) {
 			String all = "";
@@ -238,7 +246,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					if (f instanceof InstanceFieldKey) {
 						InstanceFieldKey field = (InstanceFieldKey) f;
 						String sub = traverse(H, analysis, field);
-						if (sub != null && !"?".equals(sub)) {
+						if (sub != null) {
 							String data = field.getField().getName() + ": " + sub + " ";
 							if (! all.contains(data)) {
 								all += data;
@@ -259,7 +267,18 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	
 	public void addValueAnalysis(HeapGraph<InstanceKey> H, Function<PointerKey,String> analysis) {
 		valueAnalyses.add((PointerKey key) -> {
-			return traverse(H, analysis, key);
+			String str = traverse(H, analysis, key);
+			if(str != null) {
+				final String hoverMarkupKind = this.getHoverFormatRequested();
+				final boolean useMarkdown = MarkupKind.MARKDOWN.equals(hoverMarkupKind);	
+				if(useMarkdown) {
+					return "_shape_: " + str;
+				} else {
+					return "shape: " + str;
+				}
+			} else {
+				return null;
+			}
 		});
 	}
 
@@ -282,7 +301,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	
 	private org.eclipse.lsp4j.Position positionFromWALA(Position walaCodePosition, Supplier<Integer> line, Supplier<Integer> column) {
 		org.eclipse.lsp4j.Position codeStart = new org.eclipse.lsp4j.Position();
-		codeStart.setLine(line.get());
+		codeStart.setLine(line.get()-1);
 		codeStart.setCharacter(column.get());
 		return codeStart;
 	}
