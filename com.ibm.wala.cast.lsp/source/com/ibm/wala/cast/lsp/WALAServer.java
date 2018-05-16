@@ -764,7 +764,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			public void addCodeLensesForSymbol(WalaSymbolInformation sym, List<CodeLens> result) {
 				addTypesCodeLensesForSymbol(sym, result);
-				addRefsCodeLensesForSymbol(sym, result);
+//				addRefsCodeLensesForSymbol(sym, result);
 			}
 
 			@Override
