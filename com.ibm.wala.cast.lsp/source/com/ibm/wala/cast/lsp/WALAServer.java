@@ -846,7 +846,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				for (CGNode n : CG.getNodes(function)) {
 					AstIR ir = (AstIR) n.getIR();
 					DefUse du = n.getDU();
-					for (int v = 1; v <= ir.getSymbolTable().getMaxValueNumber(); v++) {
+					for (int v = 1; v <= ir.getSymbolTable().getNumberOfParameters(); v++) {
 						if (du.getUses(v).hasNext()) {
 							SSAInstruction inst = du.getUses(v).next();
 							if (inst.iindex != -1) {
