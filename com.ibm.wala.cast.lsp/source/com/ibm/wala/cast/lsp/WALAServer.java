@@ -259,7 +259,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			}
 			final String contents = entries.entrySet().stream()
 				.map((Entry<String,String> entry) -> (useMarkdown ? ("_" + entry.getKey() + "_") : entry.getKey()) + ": " + entry.getValue())
-				.collect(Collectors.joining(",\n"));
+				.collect(Collectors.joining(","+newline(useMarkdown)));
 			return "{" + contents + "}";
 		} else {
 			return null;
@@ -1013,6 +1013,14 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		
 		return entry.getKey();		
 	}
+
+	private static String newline(boolean useMarkdown) {
+		return useMarkdown ? "\n\n" : "\n";
+	}
+
+	private static String compactName(String name) {
+		return name.trim().replaceAll("\\s++", " ");
+	}
 	
 	private <T> void positionToString(Position pos, Map<URL, NavigableMap<Position,T>> map, Set<Pair<String,BiFunction<Boolean, T, String>>> analyses, StringBuffer sb, boolean addLabel, boolean useMarkdown) {
 		if (map.containsKey(pos.getURL())) {
@@ -1025,17 +1033,19 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					BiFunction<Boolean, T, String> a = na.snd;
 					String s = a.apply(useMarkdown, scriptPositions.get(nearest));
 					if (s != null) {
-						final String name;
-						if(useMarkdown) {
-							name = "_" + n + "_";
-						} else {
-							name = n;
-						}
 						if(addLabel) {
-							sb.append(n + ": ");
+							if(useMarkdown) {
+								sb.append("_");
+								sb.append(n);
+								sb.append("_: ");
+							} else {
+								sb.append(n);
+								sb.append(": ");
+							}
 						}
-						sb.append(s + "\n");
-					}	
+						sb.append(s);
+						sb.append(newline(useMarkdown));
+					}
 				}
 			}
 		}
@@ -1069,14 +1079,19 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			return "";
 		}
 		if(sblen > 0) {
-			sb.insert(sblen, "\n");
+			sb.insert(sblen, newline(useMarkdown));
 		}
 
 		String name = "";
 		try {
-			name = new SourceBuffer(getNearest(values.get(pos.getURL()), pos)).toString() + "\n";
-			if(useMarkdown) {
-				name = "```python\n" + name + "```\n";
+			name = new SourceBuffer(getNearest(values.get(pos.getURL()), pos)).toString();
+			name = compactName(name);
+			if (!name.isEmpty()) {
+				if (useMarkdown) {
+					name = "```python\n" + name + "\n```\n";
+				} else {
+					name += "\n";
+				}
 			}
 		} catch (IOException e) {
 			e.printStackTrace();
