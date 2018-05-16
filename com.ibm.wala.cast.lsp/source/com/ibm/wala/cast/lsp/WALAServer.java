@@ -23,10 +23,12 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -235,29 +237,32 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		HeapGraph<InstanceKey> H, 
 		BiFunction<Boolean,PointerKey,String> analysis,
 //		Collector<Pair<IField,R>, A, R> collector,
-		Boolean format,
+		Boolean useMarkdown,
 		PointerKey ptr) {
-		String mine = analysis.apply(format, ptr);
+		String mine = analysis.apply(useMarkdown, ptr);
 		if (mine != null) {
 			return mine;
 		} else if (H.containsNode(ptr)) {
-			String all = "";
+			Map<String, String> entries = new LinkedHashMap<String, String>();
 			for(Iterator<?> Is = H.getSuccNodes(ptr); Is.hasNext(); ) {
 				for(Iterator<?> fields = H.getSuccNodes(Is.next()); fields.hasNext(); ) {
 					Object f = fields.next();
 					if (f instanceof InstanceFieldKey) {
 						InstanceFieldKey field = (InstanceFieldKey) f;
-						String sub = traverse(H, analysis, format, field);
+						String sub = traverse(H, analysis, useMarkdown, field);
 						if (sub != null) {
-							String data = field.getField().getName() + ": " + sub + " ";
-							if (! all.contains(data)) {
-								all += data;
-							}
+							entries.putIfAbsent(field.getField().getName().toString(), sub);
 						}
 					}
 				}
 			}
-			return "".equals(all)? null: all;
+			if(entries.isEmpty()) {
+				return null;
+			}
+			final String contents = entries.entrySet().stream()
+				.map((Entry<String,String> entry) -> (useMarkdown ? ("_" + entry.getKey() + "_") : entry.getKey()) + ": " + entry.getValue())
+				.collect(Collectors.joining(",\n"));
+			return "{" + contents + "}";
 		} else {
 			return null;
 		}
@@ -698,15 +703,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					if(typeName == null) {
 						return;
 					}
-					final Set<String> types = getTypesForName(typeName);
-					if(types == null) {
-						return;
-					}
-					final Iterator<String> iter = types.iterator();
-					if(! iter.hasNext()) {
-						return;
-					}
-					final String type = iter.next();
+					final String type = getTypeListForName(typeName);
 					if(type == null) {
 						return;
 					}
@@ -829,6 +826,16 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			}
 
 		};
+	}
+
+	private String getTypeListForName(String typeName) {
+		final Set<String> types = getTypesForName(typeName);
+		if(types == null || types.isEmpty()) {
+			return null;
+		}
+
+		final String type = types.stream().collect(Collectors.joining(", "));
+		return type;
 	}
 
 	private Set<String> getTypesForName(String typeName) {
@@ -1021,19 +1028,33 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	private String positionToType(Position pos, boolean useMarkdown) {
 		StringBuffer sb = new StringBuffer();
+		final int sblen = sb.length();
 		positionToString(pos, values, valueAnalyses, sb, false, useMarkdown);
 		if(sb.length() == 0) {
 			return null;
+		}
+		try {
+			final String name = new SourceBuffer(getNearest(values.get(pos.getURL()), pos)).toString();
+			sb.insert(sblen, name + ": ");
+		} catch (IOException e) {
+			e.printStackTrace();
 		}
 		return sb.toString();
 	}
 	
 	private String positionToString(Position pos, boolean useMarkdown) {
 		StringBuffer sb = new StringBuffer();
+		int sblen = 0;
 		positionToString(pos, values, valueAnalyses, sb, true, useMarkdown);
+		if(sblen != 0) {
+			sblen = sb.length();
+		}
 		positionToString(pos, instructions, instructionAnalyses, sb, true, useMarkdown);
 		if(sb.length() == 0) {
 			return "";
+		}
+		if(sblen > 0) {
+			sb.insert(sblen, "\n");
 		}
 
 		String name = "";
