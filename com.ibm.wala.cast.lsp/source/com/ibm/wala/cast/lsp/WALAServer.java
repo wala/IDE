@@ -35,6 +35,7 @@ import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
@@ -130,6 +131,7 @@ import com.ibm.wala.util.CancelException;
 import com.ibm.wala.util.CancelRuntimeException;
 import com.ibm.wala.util.collections.HashMapFactory;
 import com.ibm.wala.util.collections.HashSetFactory;
+import com.ibm.wala.util.collections.Pair;
 
 public class WALAServer implements LanguageClientAware, LanguageServer {
 	private LanguageClient client;
@@ -144,9 +146,9 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	private final Map<String, Map<String, WalaSymbolInformation>> documentSymbols = HashMapFactory.make();
 	
-	private final Set<Function<PointerKey,String>> valueAnalyses = HashSetFactory.make();
+	private final Set<Pair<String, BiFunction<Boolean, PointerKey,String>>> valueAnalyses = HashSetFactory.make();
 	private final Set<Map<PointerKey,AnalysisError>> valueErrors = HashSetFactory.make();
-	private final Set<Function<int[],String>> instructionAnalyses = HashSetFactory.make();
+	private final Set<Pair<String,BiFunction<Boolean,int[],String>>> instructionAnalyses = HashSetFactory.make();
 
 	private Function<int[],Set<Position>> findDefinitionAnalysis = null;
 
@@ -231,10 +233,11 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	private String traverse(
 		HeapGraph<InstanceKey> H, 
-		Function<PointerKey,String> analysis,
+		BiFunction<Boolean,PointerKey,String> analysis,
 //		Collector<Pair<IField,R>, A, R> collector,
+		Boolean format,
 		PointerKey ptr) {
-		String mine = analysis.apply(ptr);
+		String mine = analysis.apply(format, ptr);
 		if (mine != null) {
 			return mine;
 		} else if (H.containsNode(ptr)) {
@@ -244,7 +247,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					Object f = fields.next();
 					if (f instanceof InstanceFieldKey) {
 						InstanceFieldKey field = (InstanceFieldKey) f;
-						String sub = traverse(H, analysis, field);
+						String sub = traverse(H, analysis, format, field);
 						if (sub != null) {
 							String data = field.getField().getName() + ": " + sub + " ";
 							if (! all.contains(data)) {
@@ -264,25 +267,12 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		valueErrors.add(errors);
 	}
 	
-	public void addValueAnalysis(HeapGraph<InstanceKey> H, Function<PointerKey,String> analysis) {
-		valueAnalyses.add((PointerKey key) -> {
-			String str = traverse(H, analysis, key);
-			if(str != null) {
-				final String hoverMarkupKind = this.getHoverFormatRequested();
-				final boolean useMarkdown = MarkupKind.MARKDOWN.equals(hoverMarkupKind);	
-				if(useMarkdown) {
-					return "_shape_: " + str;
-				} else {
-					return "shape: " + str;
-				}
-			} else {
-				return null;
-			}
-		});
+	public void addValueAnalysis(String name, HeapGraph<InstanceKey> H, BiFunction<Boolean, PointerKey,String> analysis) {
+		valueAnalyses.add(Pair.make(name, (Boolean format, PointerKey key) -> traverse(H, analysis, format, key)));
 	}
 
-	public void addInstructionAnalysis(Function<int[],String> analysis) {
-		instructionAnalyses.add(analysis);
+	public void addInstructionAnalysis(String name, BiFunction<Boolean, int[],String> analysis) {
+		instructionAnalyses.add(Pair.make(name, analysis));
 	}
 
 	public void setFindDefinitionAnalysis(Function<int[],Set<Position>> analysis) {
@@ -466,6 +456,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		this.serverPort = port;
 	}
 
+	public static enum WalaCommand {
+		CALLS, TYPES, FIXES
+	}
+
 	@Override
 	public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
 		if(this.initializeParams != null) {
@@ -483,7 +477,11 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		caps.setDocumentSymbolProvider(true);
 		caps.setDefinitionProvider(true);
 		ExecuteCommandOptions exec = new ExecuteCommandOptions();
-		exec.setCommands(Arrays.asList("calls", "types", "fix"));
+		List<String> cmds = 
+		Arrays.stream(WalaCommand.values())
+		.map(WalaCommand::toString)
+		.collect(Collectors.toList());
+		exec.setCommands(cmds);
 		caps.setExecuteCommandProvider(exec);
 		InitializeResult v = new InitializeResult(caps);
 		caps.setCodeActionProvider(true);
@@ -587,9 +585,9 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				return CompletableFuture.supplyAsync(() -> {
 					try {
 						Position lookupPos = lookupPos(position.getPosition(), new URI(position.getTextDocument().getUri()).toURL());
-						String msg = positionToString(lookupPos);
 						final String hoverMarkupKind = getHoverFormatRequested();
 						final boolean hoverKind = MarkupKind.MARKDOWN.equals(hoverMarkupKind);
+						String msg = positionToString(lookupPos, hoverKind);
 						Hover reply = new Hover();
 						if(hoverKind) {
 							MarkupContent md = new MarkupContent();
@@ -653,6 +651,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public CompletableFuture<List<? extends Location>> references(ReferenceParams params) {
+				
 				// TODO Auto-generated method stub
 				return null;
 			}
@@ -681,7 +680,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				if (params.getContext().getDiagnostics().toString().contains("possible fix:")) {
 					return CompletableFuture.supplyAsync(() -> {
 						Command fix = new Command();
-						fix.setCommand("fix");
+						fix.setCommand(WalaCommand.FIXES.toString());
 						String message = params.getContext().getDiagnostics().get(0).getMessage();
 						fix.setTitle(message.substring(message.indexOf("possible fix:")+13, message.length()-1));
 						List<Object> args = new LinkedList<Object>(params.getContext().getDiagnostics());
@@ -693,28 +692,57 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				}
 			}
 
+			public void addTypesCodeLensesForSymbol(WalaSymbolInformation sym, List<CodeLens> result) {
+					CodeLens cl = new CodeLens();
+					final String typeName = sym.getFunction().getDeclaringClass().getName().toString();
+					if(typeName == null) {
+						return;
+					}
+					final Set<String> types = getTypesForName(typeName);
+					if(types == null) {
+						return;
+					}
+					final Iterator<String> iter = types.iterator();
+					if(! iter.hasNext()) {
+						return;
+					}
+					final String type = iter.next();
+					if(type == null) {
+						return;
+					}
+
+					final String command = WalaCommand.TYPES.toString();
+					final String title = type;
+					Command cmd = new Command(title, command);
+					cmd.setArguments(Arrays.asList(typeName));
+					cl.setCommand(cmd);
+					cl.setRange(sym.getLocation().getRange());
+					result.add(cl);
+			}
+
+			public void addRefsCodeLensesForSymbol(WalaSymbolInformation sym, List<CodeLens> result) {
+				CodeLens cl = new CodeLens();
+				final String command = WalaCommand.CALLS.toString();
+				final String title = "refs";
+				Command cmd = new Command(title, command);
+				cmd.setArguments(Arrays.asList(sym.getFunction().getDeclaringClass().getName().toString()));
+				cl.setCommand(cmd);
+				cl.setRange(sym.getLocation().getRange());
+				result.add(cl);
+		}
+
+			public void addCodeLensesForSymbol(WalaSymbolInformation sym, List<CodeLens> result) {
+				addTypesCodeLensesForSymbol(sym, result);
+				addRefsCodeLensesForSymbol(sym, result);
+			}
+
 			@Override
 			public CompletableFuture<List<? extends CodeLens>> codeLens(CodeLensParams params) {
 				return CompletableFuture.supplyAsync(() -> {
 					List<CodeLens> result = new LinkedList<CodeLens>();
 					String document = params.getTextDocument().getUri();
 					for(WalaSymbolInformation sym : documentSymbols.get(document).values()) {
-						for(String command : new String[] {"types", "calls"}) {
-							CodeLens cl = new CodeLens();
-							final String title;
-							if(command.equals("types")) {
-								title = "type";
-							} else if(command.equals("calls")) {
-								title = "call sites";
-							} else {
-								continue;
-							}
-							Command cmd = new Command(title, command);
-							cmd.setArguments(Arrays.asList(sym.getFunction().getDeclaringClass().getName().toString()));
-							cl.setCommand(cmd);
-							cl.setRange(sym.getLocation().getRange());
-							result.add(cl);
-						}
+						addCodeLensesForSymbol(sym, result);
 					}
 					return result;
 				});
@@ -803,25 +831,26 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		};
 	}
 
-	private CompletableFuture<Object> typesCommand(ExecuteCommandParams params) {
-		return CompletableFuture.supplyAsync(() -> {
-			Set<String> result = HashSetFactory.make();
-			for(CallGraph CG : languageBuilders.values()) {
-				for(IClassLoader loader : CG.getClassHierarchy().getLoaders()) {
-					String typeName = ((JsonPrimitive)params.getArguments().get(0)).getAsString();
-					MethodReference function = AstMethodReference.fnReference(TypeReference.findOrCreate(loader.getReference(), typeName));
-					for(CGNode n : CG.getNodes(function)) {
-						AstIR ir = (AstIR) n.getIR();
-						DefUse du = n.getDU();
-						for(int v = 1; v <= ir.getSymbolTable().getMaxValueNumber(); v++) {
-							if (du.getUses(v).hasNext()) {
-								SSAInstruction inst = du.getUses(v).next();
-								if (inst.iindex != -1 ) {
-									for(int i = 0; i < inst.getNumberOfUses(); i++) {
-										if (inst.getUse(i) == v) {
-											Position pos = ir.getMethod().debugInfo().getOperandPosition(inst.iindex, i);
-											if (pos != null) { 
-												result.add(positionToString(pos));
+	private Set<String> getTypesForName(String typeName) {
+		Set<String> result = HashSetFactory.make();
+		for (CallGraph CG : languageBuilders.values()) {
+			for (IClassLoader loader : CG.getClassHierarchy().getLoaders()) {
+				MethodReference function = AstMethodReference
+						.fnReference(TypeReference.findOrCreate(loader.getReference(), typeName));
+				for (CGNode n : CG.getNodes(function)) {
+					AstIR ir = (AstIR) n.getIR();
+					DefUse du = n.getDU();
+					for (int v = 1; v <= ir.getSymbolTable().getMaxValueNumber(); v++) {
+						if (du.getUses(v).hasNext()) {
+							SSAInstruction inst = du.getUses(v).next();
+							if (inst.iindex != -1) {
+								for (int i = 0; i < inst.getNumberOfUses(); i++) {
+									if (inst.getUse(i) == v) {
+										Position pos = ir.getMethod().debugInfo().getOperandPosition(inst.iindex, i);
+										if (pos != null) {
+											String type = positionToType(pos, false);
+											if(type != null) {
+												result.add(type);
 											}
 										}
 									}
@@ -831,7 +860,14 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					}
 				}
 			}
-			return result;
+		}
+		return result;
+	}
+
+	private CompletableFuture<Object> typesCommand(ExecuteCommandParams params) {
+		return CompletableFuture.supplyAsync(() -> {
+			String typeName = ((JsonPrimitive)params.getArguments().get(0)).getAsString();
+			return getTypesForName(typeName);
 		});
 	}
 					
@@ -876,9 +912,18 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public CompletableFuture<Object> executeCommand(ExecuteCommandParams params) {
-				return "calls".equals(params.getCommand())? callersCommand(params):
-						"fix".equals(params.getCommand())? fix(params):
-						 typesCommand(params);
+				final String cmdString = params.getCommand();
+				final WalaCommand cmd = WalaCommand.valueOf(cmdString);
+				switch(cmd) {
+					case CALLS:
+						return callersCommand(params);
+					case TYPES:
+						return typesCommand(params);
+					case FIXES:
+						return fix(params);
+					default:
+						throw new UnsupportedOperationException("The \"" + cmdString + "\" operations is not currently supported by the WALA LSP server.");
+				}
 			}
 
 
@@ -947,34 +992,52 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		return entry.getKey();		
 	}
 	
-	private <T> void positionToString(Position pos, Map<URL, NavigableMap<Position,T>> map, Set<Function<T, String>> analyses, StringBuffer sb) {
+	private <T> void positionToString(Position pos, Map<URL, NavigableMap<Position,T>> map, Set<Pair<String,BiFunction<Boolean, T, String>>> analyses, StringBuffer sb, boolean addLabel, boolean useMarkdown) {
 		if (map.containsKey(pos.getURL())) {
 			NavigableMap<Position, T> scriptPositions = map.get(pos.getURL());
 			Position nearest = getNearest(scriptPositions, pos);
-		
+
 			if (nearest != null) {
-				for(Function<T,String> a : analyses) {
-					String s = a.apply(scriptPositions.get(nearest));
+				for(Pair<String, BiFunction<Boolean, T,String>> na : analyses) {
+					String n = na.fst;
+					BiFunction<Boolean, T, String> a = na.snd;
+					String s = a.apply(useMarkdown, scriptPositions.get(nearest));
 					if (s != null) {
+						final String name;
+						if(useMarkdown) {
+							name = "_" + n + "_";
+						} else {
+							name = n;
+						}
+						if(addLabel) {
+							sb.append(n + ": ");
+						}
 						sb.append(s + "\n");
 					}	
 				}
 			}
 		}
 	}
-	
-	private String positionToString(Position pos) {
+
+	private String positionToType(Position pos, boolean useMarkdown) {
 		StringBuffer sb = new StringBuffer();
-		positionToString(pos, values, valueAnalyses, sb);
-		positionToString(pos, instructions, instructionAnalyses, sb);
+		positionToString(pos, values, valueAnalyses, sb, false, useMarkdown);
+		if(sb.length() == 0) {
+			return null;
+		}
+		return sb.toString();
+	}
+	
+	private String positionToString(Position pos, boolean useMarkdown) {
+		StringBuffer sb = new StringBuffer();
+		positionToString(pos, values, valueAnalyses, sb, true, useMarkdown);
+		positionToString(pos, instructions, instructionAnalyses, sb, true, useMarkdown);
 		if(sb.length() == 0) {
 			return "";
 		}
 
 		String name = "";
 		try {
-			final String hoverMarkupKind = this.getHoverFormatRequested();
-			final boolean useMarkdown = MarkupKind.MARKDOWN.equals(hoverMarkupKind);
 			name = new SourceBuffer(getNearest(values.get(pos.getURL()), pos)).toString() + "\n";
 			if(useMarkdown) {
 				name = "```python\n" + name + "```\n";
@@ -992,7 +1055,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		for(URL script : values.keySet()) {
 			sb.append(script + "\n");
 			for(Position pos : values.get(script).keySet()) {
-				sb.append(pos + ": " + positionToString(pos));
+				sb.append(pos + ": " + positionToString(pos, false));
 			}
 		}
 		return sb.toString();
