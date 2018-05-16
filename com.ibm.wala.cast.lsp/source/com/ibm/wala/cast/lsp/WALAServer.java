@@ -777,10 +777,14 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 							for(int i = 0; i < insts.length; i++) {
 								if (insts[i] == null) {
 									Position assignPos = debugInfo.getInstructionPosition(i);
+
 									if (assignPos != null) {
 										CodeLens cl = new CodeLens();
 										final String command = WalaCommand.TYPES.toString();
-										final String title = positionToString(assignPos, false);
+										final String title = positionToType(assignPos, false);
+										if(title == null) {
+											continue;
+										}
 										try {
 											String code = new SourceBuffer(assignPos).toString();
 											if (! "".equals(title) && code.startsWith(title.substring(0, 1))) {
@@ -1138,7 +1142,8 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			return null;
 		}
 		try {
-			final String name = new SourceBuffer(getNearest(values.get(pos.getURL()), pos)).toString();
+			String name = new SourceBuffer(getNearest(values.get(pos.getURL()), pos)).toString();
+			name = compactName(name);
 			sb.insert(sblen, name + ": ");
 		} catch (IOException e) {
 			e.printStackTrace();
