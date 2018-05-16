@@ -24,6 +24,7 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -110,6 +111,7 @@ import com.ibm.wala.cast.loader.AstMethod;
 import com.ibm.wala.cast.tree.CAstSourcePositionMap.Position;
 import com.ibm.wala.cast.types.AstMethodReference;
 import com.ibm.wala.cast.util.SourceBuffer;
+import com.ibm.wala.classLoader.CallSiteReference;
 import com.ibm.wala.classLoader.IClass;
 import com.ibm.wala.classLoader.IClassLoader;
 import com.ibm.wala.classLoader.IMethod;
@@ -124,6 +126,7 @@ import com.ibm.wala.ipa.callgraph.propagation.InstanceKey;
 import com.ibm.wala.ipa.callgraph.propagation.PointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PropagationCallGraphBuilder;
 import com.ibm.wala.ssa.DefUse;
+import com.ibm.wala.ssa.IR;
 import com.ibm.wala.ssa.SSAInstruction;
 import com.ibm.wala.types.MethodReference;
 import com.ibm.wala.types.TypeReference;
@@ -655,11 +658,42 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public CompletableFuture<List<? extends Location>> references(ReferenceParams params) {
-				
-				// TODO Auto-generated method stub
-				return null;
+				return CompletableFuture.supplyAsync(() -> {
+					Set<Location> result = HashSetFactory.make();
+					org.eclipse.lsp4j.Position pos = params.getPosition();
+					String file = params.getTextDocument().getUri();
+					if (documentSymbols.containsKey(file)) {
+						Collection<WalaSymbolInformation> symbols = documentSymbols.get(file).values();
+						for(WalaSymbolInformation symbol : symbols) {
+							org.eclipse.lsp4j.Position sp = symbol.getLocation().getRange().getStart();
+							if (pos.equals(sp)) {
+								for(CallGraph CG : languageBuilders.values()) {
+									for(IClassLoader loader : CG.getClassHierarchy().getLoaders()) {
+										String typeName = symbol.getName();
+										MethodReference function = AstMethodReference.fnReference(TypeReference.findOrCreate(loader.getReference(), typeName));
+										for(CGNode symbolNode : CG.getNodes(function)) {
+											for(Iterator<CGNode> callerNodes = CG.getPredNodes(symbolNode); callerNodes.hasNext(); ) {
+												CGNode callerNode = callerNodes.next();
+												if (callerNode.getMethod() instanceof AstMethod) {
+													IR callerIR = callerNode.getIR();
+													for (Iterator<CallSiteReference> sites = CG.getPossibleSites(callerNode, symbolNode); sites.hasNext(); ) {
+														CallSiteReference site = sites.next();
+														SSAInstruction inst = callerIR.getCalls(site)[0];
+														Position p = ((AstMethod)callerNode.getMethod()).getSourcePosition(inst.iindex);
+														result.add(locationFromWALA(p));
+													}
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+					return new LinkedList<>(result);
+				});
 			}
-
+			
 			@Override
 			public CompletableFuture<List<? extends DocumentHighlight>> documentHighlight(
 					TextDocumentPositionParams position) {
