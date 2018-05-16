@@ -893,8 +893,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					client.applyEdit(editParams);
 				}
 				
-				// TODO Auto-generated method stub
-				return null;
+				return CompletableFuture.completedFuture(null);
 			}
 
 			@Override
