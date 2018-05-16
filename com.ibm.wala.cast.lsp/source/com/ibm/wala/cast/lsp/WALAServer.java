@@ -40,6 +40,7 @@ import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import org.eclipse.lsp4j.ApplyWorkspaceEditParams;
 import org.eclipse.lsp4j.ClientCapabilities;
 import org.eclipse.lsp4j.CodeActionParams;
 import org.eclipse.lsp4j.CodeLens;
@@ -96,6 +97,7 @@ import org.eclipse.lsp4j.services.LanguageServer;
 import org.eclipse.lsp4j.services.TextDocumentService;
 import org.eclipse.lsp4j.services.WorkspaceService;
 
+import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.ibm.wala.analysis.pointers.HeapGraph;
 import com.ibm.wala.cast.ir.ssa.AstIRFactory.AstIR;
@@ -423,29 +425,23 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			Map<String, List<Diagnostic>> diags = HashMapFactory.make();
 			for(Map<PointerKey,AnalysisError> ve : valueErrors) {
 				errors: for(Map.Entry<PointerKey,AnalysisError> e : ve.entrySet()) {
-					if (e.getKey() instanceof LocalPointerKey) {
-						LocalPointerKey k = (LocalPointerKey) e.getKey();
-						SSAInstruction inst = k.getNode().getDU().getDef(k.getValueNumber());
-						if (inst != null) {
-							Diagnostic d = new Diagnostic();
-							// Diagnostics do not currently support markdown
-							d.setMessage(e.getValue().toString(false));
-							Position pos = ((AstMethod)k.getNode().getMethod()).debugInfo().getInstructionPosition(inst.iindex);
-							Location loc = locationFromWALA(pos);
-							d.setRange(loc.getRange());
-
-							String uri = loc.getUri();
-							if (! diags.containsKey(uri)) {
-								diags.put(uri, new LinkedList<>());
-							}
-							for(Diagnostic od : diags.get(uri)) {
-								if (od.toString().equals(d.toString())) {
-									continue errors;
-								}
-							}
-							diags.get(uri).add(d);
+					Diagnostic d = new Diagnostic();
+					// Diagnostics do not currently support markdown
+					d.setMessage(e.getValue().toString(false));
+					Position pos = e.getValue().position();
+					Location loc = locationFromWALA(pos);
+					d.setRange(loc.getRange());
+					d.setSource(loc.getUri());
+					String uri = loc.getUri();
+					if (! diags.containsKey(uri)) {
+						diags.put(uri, new LinkedList<>());
+					}
+					for(Diagnostic od : diags.get(uri)) {
+						if (od.toString().equals(d.toString())) {
+							continue errors;
 						}
 					}
+					diags.get(uri).add(d);
 				}
 			}
 
@@ -487,7 +483,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		caps.setDocumentSymbolProvider(true);
 		caps.setDefinitionProvider(true);
 		ExecuteCommandOptions exec = new ExecuteCommandOptions();
-		exec.setCommands(Arrays.asList("calls", "types"));
+		exec.setCommands(Arrays.asList("calls", "types", "fix"));
 		caps.setExecuteCommandProvider(exec);
 		InitializeResult v = new InitializeResult(caps);
 		caps.setCodeActionProvider(true);
@@ -686,7 +682,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					return CompletableFuture.supplyAsync(() -> {
 						Command fix = new Command();
 						fix.setCommand("fix");
-						fix.setArguments(Arrays.asList(params.getContext().getDiagnostics()));
+						String message = params.getContext().getDiagnostics().get(0).getMessage();
+						fix.setTitle(message.substring(message.indexOf("possible fix:")+13, message.length()-1));
+						List<Object> args = new LinkedList<Object>(params.getContext().getDiagnostics());
+						fix.setArguments(args);
 						return Collections.singletonList(fix);
 					});
 				} else {
@@ -877,9 +876,26 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public CompletableFuture<Object> executeCommand(ExecuteCommandParams params) {
-				return "calls".equals(params.getCommand())? callersCommand(params) : typesCommand(params);
+				return "calls".equals(params.getCommand())? callersCommand(params):
+						"fix".equals(params.getCommand())? fix(params):
+						 typesCommand(params);
 			}
 
+
+			private CompletableFuture<Object> fix(ExecuteCommandParams params) {
+				for (Object o : params.getArguments()) {
+					JsonObject d = (JsonObject)o;
+					ApplyWorkspaceEditParams editParams = new ApplyWorkspaceEditParams();
+					editParams.setLabel("fix");
+					WorkspaceEdit edit = new WorkspaceEdit();
+					editParams.setEdit(edit);
+					TextEdit change = new TextEdit();
+					client.applyEdit(editParams);
+				}
+				
+				// TODO Auto-generated method stub
+				return null;
+			}
 
 			@Override
 			public void didChangeConfiguration(DidChangeConfigurationParams params) {
