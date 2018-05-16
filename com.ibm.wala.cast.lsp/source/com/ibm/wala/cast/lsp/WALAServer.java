@@ -482,6 +482,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		caps.setCodeLensProvider(cl);
 		caps.setDocumentSymbolProvider(true);
 		caps.setDefinitionProvider(true);
+		caps.setReferencesProvider(true);
 		ExecuteCommandOptions exec = new ExecuteCommandOptions();
 		List<String> cmds = 
 		Arrays.stream(WalaCommand.values())
