@@ -565,7 +565,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	}
 
 	private String extractFix(String message) {
-		return message.substring(message.indexOf("possible fix:")+13, message.length()-1);
+		return message.substring(message.indexOf("possible fix:")+14, message.length()-1);
 	}
 
 	@Override
