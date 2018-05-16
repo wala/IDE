@@ -23,7 +23,6 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Paths;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
@@ -122,7 +121,6 @@ import com.ibm.wala.ipa.callgraph.CallGraph;
 import com.ibm.wala.ipa.callgraph.propagation.HeapModel;
 import com.ibm.wala.ipa.callgraph.propagation.InstanceFieldKey;
 import com.ibm.wala.ipa.callgraph.propagation.InstanceKey;
-import com.ibm.wala.ipa.callgraph.propagation.LocalPointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PropagationCallGraphBuilder;
 import com.ibm.wala.ssa.DefUse;
@@ -293,7 +291,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		}
 	}
 	
-	private org.eclipse.lsp4j.Position positionFromWALA(Position walaCodePosition, Supplier<Integer> line, Supplier<Integer> column) {
+	private org.eclipse.lsp4j.Position positionFromWALA(Supplier<Integer> line, Supplier<Integer> column) {
 		org.eclipse.lsp4j.Position codeStart = new org.eclipse.lsp4j.Position();
 		codeStart.setLine(line.get()-1);
 		codeStart.setCharacter(column.get());
@@ -302,10 +300,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	
 	private Location locationFromWALA(Position walaCodePosition) {
 		Location codeLocation = new Location();
-		codeLocation.setUri(walaCodePosition.getURL().toString());
+		codeLocation.setUri(getPositionUri(walaCodePosition).toString());
 		Range codeRange = new Range();
-		codeRange.setStart(positionFromWALA(walaCodePosition, walaCodePosition::getFirstLine, walaCodePosition::getFirstCol));
-		codeRange.setEnd(positionFromWALA(walaCodePosition, walaCodePosition::getLastLine, walaCodePosition::getLastCol));
+		codeRange.setStart(positionFromWALA(walaCodePosition::getFirstLine, walaCodePosition::getFirstCol));
+		codeRange.setEnd(positionFromWALA(walaCodePosition::getLastLine, walaCodePosition::getLastCol));
 		codeLocation.setRange(codeRange);
 		return codeLocation;
 	}
@@ -566,6 +564,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		};
 	}
 
+	private String extractFix(String message) {
+		return message.substring(message.indexOf("possible fix:")+13, message.length()-1);
+	}
+
 	@Override
 	public TextDocumentService getTextDocumentService() {
 		return new TextDocumentService() {
@@ -679,19 +681,19 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public CompletableFuture<List<? extends Command>> codeAction(CodeActionParams params) {
-				if (params.getContext().getDiagnostics().toString().contains("possible fix:")) {
-					return CompletableFuture.supplyAsync(() -> {
+				return CompletableFuture.supplyAsync(() -> {
+					if (params.getContext().getDiagnostics().toString().contains("possible fix:")) {
 						Command fix = new Command();
 						fix.setCommand(WalaCommand.FIXES.toString());
 						String message = params.getContext().getDiagnostics().get(0).getMessage();
-						fix.setTitle(message.substring(message.indexOf("possible fix:")+13, message.length()-1));
+						fix.setTitle(extractFix(message));
 						List<Object> args = new LinkedList<Object>(params.getContext().getDiagnostics());
 						fix.setArguments(args);
-						return Collections.singletonList(fix);
-					});
-				} else {
-					return CompletableFuture.completedFuture(Collections.emptyList());
-				}
+						return Collections.singletonList(fix);					
+					} else {
+						return Collections.emptyList();
+					}
+				});
 			}
 
 			public void addTypesCodeLensesForSymbol(WalaSymbolInformation sym, List<CodeLens> result) {
@@ -930,7 +932,20 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				}
 			}
 
-
+			private org.eclipse.lsp4j.Position positionFromJSON(JsonObject o) {
+				org.eclipse.lsp4j.Position codeStart = new org.eclipse.lsp4j.Position();
+				codeStart.setLine(o.get("line").getAsInt());
+				codeStart.setCharacter(o.get("character").getAsInt());
+				return codeStart;
+			}
+			
+			private Range rangeFromJSON(JsonObject o) {
+				Range range = new Range();
+				range.setStart(positionFromJSON(o.get("start").getAsJsonObject()));
+				range.setEnd(positionFromJSON(o.get("end").getAsJsonObject()));
+				return range;
+			}
+			
 			private CompletableFuture<Object> fix(ExecuteCommandParams params) {
 				for (Object o : params.getArguments()) {
 					JsonObject d = (JsonObject)o;
@@ -939,6 +954,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					WorkspaceEdit edit = new WorkspaceEdit();
 					editParams.setEdit(edit);
 					TextEdit change = new TextEdit();
+					String msg = d.get("message").getAsString();
+					change.setNewText(extractFix(msg));
+					change.setRange(rangeFromJSON(d.get("range").getAsJsonObject()));
+					edit.getChanges().put(d.get("source").getAsString(), Collections.singletonList(change));
 					client.applyEdit(editParams);
 				}
 				
