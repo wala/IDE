@@ -108,6 +108,7 @@ import com.ibm.wala.cast.ir.ssa.SSAConversion.CopyPropagationRecord;
 import com.ibm.wala.cast.ir.ssa.SSAConversion.SSAInformation;
 import com.ibm.wala.cast.loader.AstFunctionClass;
 import com.ibm.wala.cast.loader.AstMethod;
+import com.ibm.wala.cast.loader.AstMethod.DebuggingInformation;
 import com.ibm.wala.cast.tree.CAstSourcePositionMap.Position;
 import com.ibm.wala.cast.types.AstMethodReference;
 import com.ibm.wala.cast.util.SourceBuffer;
@@ -402,7 +403,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					});
 
 					SSAInformation info = ir.getLocalMap();
-					Map<Object, CopyPropagationRecord> copyHistory = info.getCopyHistory();
+					Map<?, CopyPropagationRecord> copyHistory = info.getCopyHistory();
 					copyHistory.values().forEach((CopyPropagationRecord rec) -> {
 						int instIndex = rec.getInstructionIndex();
 						Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(instIndex);
@@ -760,10 +761,53 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				cl.setCommand(cmd);
 				cl.setRange(sym.getLocation().getRange());
 				result.add(cl);
-		}
+			}
 
+			public void addAssignCodeLensesForSymbol(WalaSymbolInformation sym, List<CodeLens> result) {
+				final Set<Range> done = HashSetFactory.make();
+				final String typeName = sym.getFunction().getDeclaringClass().getName().toString();
+				for (CallGraph CG : languageBuilders.values()) {
+					for (IClassLoader loader : CG.getClassHierarchy().getLoaders()) {
+						MethodReference function = AstMethodReference
+								.fnReference(TypeReference.findOrCreate(loader.getReference(), typeName));
+						for (CGNode n : CG.getNodes(function)) {
+							AstIR ir = (AstIR) n.getIR();
+							SSAInstruction[] insts = ir.getInstructions();
+							DebuggingInformation debugInfo = ir.getMethod().debugInfo();
+							for(int i = 0; i < insts.length; i++) {
+								if (insts[i] == null) {
+									Position assignPos = debugInfo.getInstructionPosition(i);
+									if (assignPos != null) {
+										CodeLens cl = new CodeLens();
+										final String command = WalaCommand.TYPES.toString();
+										final String title = positionToString(assignPos, false);
+										try {
+											String code = new SourceBuffer(assignPos).toString();
+											if (! "".equals(title) && code.startsWith(title.substring(0, 1))) {
+												Command cmd = new Command(title, command);
+												cmd.setArguments(Arrays.asList(typeName));
+												cl.setCommand(cmd);
+												cl.setRange(locationFromWALA(assignPos).getRange());
+												if (! done.contains(cl.getRange())) {
+													done.add(cl.getRange());
+													result.add(cl);
+												}
+											}
+										} catch (IOException e) {
+											// TODO Auto-generated catch block
+											e.printStackTrace();
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+						
 			public void addCodeLensesForSymbol(WalaSymbolInformation sym, List<CodeLens> result) {
 				addTypesCodeLensesForSymbol(sym, result);
+				addAssignCodeLensesForSymbol(sym, result);
 //				addRefsCodeLensesForSymbol(sym, result);
 			}
 
