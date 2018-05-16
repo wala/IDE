@@ -496,9 +496,6 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	public void initialized(InitializedParams params) {
 		System.err.println("client sent " + params);
-		MessageParams m = new MessageParams();
-		m.setMessage("Welcome to WALA");
-		client.showMessage(m);
 	}
 	
 	@Override
