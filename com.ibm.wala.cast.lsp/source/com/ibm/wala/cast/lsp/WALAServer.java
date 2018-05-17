@@ -428,7 +428,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					Position pos = e.getValue().position();
 					Location loc = locationFromWALA(pos);
 					d.setRange(loc.getRange());
-					d.setSource(loc.getUri());
+					d.setSource("Ariadne");
 					String uri = loc.getUri();
 					if (! diags.containsKey(uri)) {
 						diags.put(uri, new LinkedList<>());
