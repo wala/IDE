@@ -769,7 +769,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				for (CallGraph CG : languageBuilders.values()) {
 					for (IClassLoader loader : CG.getClassHierarchy().getLoaders()) {
 						MethodReference function = AstMethodReference
-								.fnReference(TypeReference.findOrCreate(loader.getReference(), typeName));
+							.fnReference(TypeReference.findOrCreate(loader.getReference(), typeName));
 						for (CGNode n : CG.getNodes(function)) {
 							AstIR ir = (AstIR) n.getIR();
 							SSAInstruction[] insts = ir.getInstructions();
