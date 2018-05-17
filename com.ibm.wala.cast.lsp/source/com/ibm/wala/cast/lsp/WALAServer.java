@@ -469,12 +469,12 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	@Override
 	public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
+		System.err.println("client sent " + params);
 		if(this.initializeParams != null) {
 			// initialize should only be called once
 			client.logMessage(new MessageParams(MessageType.Error, "initialize called multiple times."));
 		}
 		this.initializeParams = params;
-		System.err.println("client sent " + params);
 		final ServerCapabilities caps = new ServerCapabilities();
 		caps.setHoverProvider(true);
 		caps.setTextDocumentSync(TextDocumentSyncKind.Full);
@@ -724,6 +724,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 						String message = params.getContext().getDiagnostics().get(0).getMessage();
 						fix.setTitle(extractFix(message));
 						List<Object> args = new LinkedList<Object>(params.getContext().getDiagnostics());
+						args.add(0, params.getTextDocument().getUri());
 						fix.setArguments(args);
 						return Collections.singletonList(fix);					
 					} else {
@@ -1030,18 +1031,23 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			}
 			
 			private CompletableFuture<Object> fix(ExecuteCommandParams params) {
+				String uri = null;
 				for (Object o : params.getArguments()) {
-					JsonObject d = (JsonObject)o;
-					ApplyWorkspaceEditParams editParams = new ApplyWorkspaceEditParams();
-					editParams.setLabel("fix");
-					WorkspaceEdit edit = new WorkspaceEdit();
-					editParams.setEdit(edit);
-					TextEdit change = new TextEdit();
-					String msg = d.get("message").getAsString();
-					change.setNewText(extractFix(msg));
-					change.setRange(rangeFromJSON(d.get("range").getAsJsonObject()));
-					edit.getChanges().put(d.get("source").getAsString(), Collections.singletonList(change));
-					client.applyEdit(editParams);
+					if (o instanceof JsonObject) {
+						JsonObject d = (JsonObject)o;
+						ApplyWorkspaceEditParams editParams = new ApplyWorkspaceEditParams();
+						editParams.setLabel("fix");
+						WorkspaceEdit edit = new WorkspaceEdit();
+						editParams.setEdit(edit);
+						TextEdit change = new TextEdit();
+						String msg = d.get("message").getAsString();
+						change.setNewText(extractFix(msg));
+						change.setRange(rangeFromJSON(d.get("range").getAsJsonObject()));
+						edit.getChanges().put(uri, Collections.singletonList(change));
+						client.applyEdit(editParams);
+					} else {
+						uri = ((JsonPrimitive)o).getAsString();
+					}
 				}
 				
 				return CompletableFuture.completedFuture(null);
