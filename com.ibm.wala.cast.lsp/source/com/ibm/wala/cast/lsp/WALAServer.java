@@ -54,6 +54,7 @@ import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionList;
 import org.eclipse.lsp4j.CompletionParams;
 import org.eclipse.lsp4j.Diagnostic;
+import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.DidChangeConfigurationParams;
 import org.eclipse.lsp4j.DidChangeTextDocumentParams;
 import org.eclipse.lsp4j.DidChangeWatchedFilesParams;
@@ -429,6 +430,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					Location loc = locationFromWALA(pos);
 					d.setRange(loc.getRange());
 					d.setSource("Ariadne");
+					d.setSeverity(DiagnosticSeverity.Warning);
 					String uri = loc.getUri();
 					if (! diags.containsKey(uri)) {
 						diags.put(uri, new LinkedList<>());
