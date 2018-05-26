@@ -145,24 +145,24 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	private final Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>> languages;
 	
-	private final Map<String, Set<Module>> languageSources = HashMapFactory.make();
+	private final Map<String, Map<String,Module>> languageSources = HashMapFactory.make();
 
 	private final Map<String, CallGraph> languageBuilders = HashMapFactory.make();
 
 	private final Map<String, Map<String, WalaSymbolInformation>> documentSymbols = HashMapFactory.make();
 	
 	private final Set<Pair<String, BiFunction<Boolean, PointerKey,String>>> valueAnalyses = HashSetFactory.make();
-	private final Set<Map<PointerKey,AnalysisError>> valueErrors = HashSetFactory.make();
+	private final Map<String, Map<PointerKey,AnalysisError>> valueErrors = HashMapFactory.make();
 	private final Set<Pair<String,BiFunction<Boolean,int[],String>>> instructionAnalyses = HashSetFactory.make();
 
 	private Function<int[],Set<Position>> findDefinitionAnalysis = null;
 
-	public boolean addSource(String language, Module file) {
+	public boolean addSource(String language, String url, Module file) {
 		if (! languageSources.containsKey(language)) {
-			languageSources.put(language, HashSetFactory.make());
+			languageSources.put(language, HashMapFactory.make());
 		}
 		
-		return languageSources.get(language).add(file);
+		return languageSources.get(language).put(url, file) != file;
 	}
 	
 	// The information the client sent to use when it called initialize
@@ -271,8 +271,8 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		}
 	};
 
-	public void addValueErrors(Map<PointerKey,AnalysisError> errors) {
-		valueErrors.add(errors);
+	public void addValueErrors(String language, Map<PointerKey,AnalysisError> errors) {
+		valueErrors.put(language, errors);
 	}
 	
 	public void addValueAnalysis(String name, HeapGraph<InstanceKey> H, BiFunction<Boolean, PointerKey,String> analysis) {
@@ -346,14 +346,29 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	
 	public void analyze(String language) {
 		try {
+			if (valueErrors.containsKey(language)) {
+				valueErrors.get(language).clear();
+			}
+			
 			AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?> engine = languages.apply(language);
 
-			engine.setModuleFiles(languageSources.get(language));
+			engine.setModuleFiles(languageSources.get(language).values());
 			PropagationCallGraphBuilder cgBuilder = (PropagationCallGraphBuilder) engine.defaultCallGraphBuilder();
 
 			CallGraph CG = cgBuilder.getCallGraph();
 			HeapModel H = cgBuilder.getPointerAnalysis().getHeapModel();
 
+			CG.iterator().forEachRemaining((CGNode n) -> { 
+				IMethod m = n.getMethod();
+				if (m instanceof AstMethod) {
+					URL url = ((AstMethod)m).debugInfo().getCodeBodyPosition().getURL();
+					if (values.containsKey(url)) {
+						values.get(url).clear();
+						instructions.get(url).clear();
+					}
+				}
+			});
+			
 			for(IClass cls : CG.getClassHierarchy()) {
 				if (cls instanceof AstFunctionClass) {
 					AstMethod code = ((AstFunctionClass)cls).getCodeBody();
@@ -421,27 +436,25 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			languageBuilders.put(language, CG);
 			
 			Map<String, List<Diagnostic>> diags = HashMapFactory.make();
-			for(Map<PointerKey,AnalysisError> ve : valueErrors) {
-				errors: for(Map.Entry<PointerKey,AnalysisError> e : ve.entrySet()) {
-					Diagnostic d = new Diagnostic();
-					// Diagnostics do not currently support markdown
-					d.setMessage(e.getValue().toString(false));
-					Position pos = e.getValue().position();
-					Location loc = locationFromWALA(pos);
-					d.setRange(loc.getRange());
-					d.setSource("Ariadne");
-					d.setSeverity(DiagnosticSeverity.Warning);
-					String uri = loc.getUri();
-					if (! diags.containsKey(uri)) {
-						diags.put(uri, new LinkedList<>());
-					}
-					for(Diagnostic od : diags.get(uri)) {
-						if (od.toString().equals(d.toString())) {
-							continue errors;
-						}
-					}
-					diags.get(uri).add(d);
+			errors: for(Map.Entry<PointerKey,AnalysisError> e : valueErrors.get(language).entrySet()) {
+				Diagnostic d = new Diagnostic();
+				// Diagnostics do not currently support markdown
+				d.setMessage(e.getValue().toString(false));
+				Position pos = e.getValue().position();
+				Location loc = locationFromWALA(pos);
+				d.setRange(loc.getRange());
+				d.setSource("Ariadne");
+				d.setSeverity(DiagnosticSeverity.Warning);
+				String uri = loc.getUri();
+				if (! diags.containsKey(uri)) {
+					diags.put(uri, new LinkedList<>());
 				}
+				for(Diagnostic od : diags.get(uri)) {
+					if (od.toString().equals(d.toString())) {
+						continue errors;
+					}
+				}
+				diags.get(uri).add(d);
 			}
 
 			for(Map.Entry<String,List<Diagnostic>> d : diags.entrySet()) {
@@ -864,7 +877,8 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			public void didOpen(DidOpenTextDocumentParams params) {
 				try {
 					String language = params.getTextDocument().getLanguageId();
-					if (addSource(language, new SourceURLModule(new URL(params.getTextDocument().getUri())))) {
+					String uri = params.getTextDocument().getUri();
+					if (addSource(language, uri, new SourceURLModule(new URL(uri)))) {
 						analyze(language);
 					}
 				} catch (MalformedURLException e) {
@@ -883,30 +897,22 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public void didClose(DidCloseTextDocumentParams params) {
-				try {
-					Module M = new SourceURLModule(new URL(params.getTextDocument().getUri()));
-					for(Map.Entry<String, Set<Module>> sl : languageSources.entrySet()) {
-						if (sl.getValue().contains(M)) {
-							sl.getValue().remove(M);
-							analyze(sl.getKey());
-						}
+				String uri = params.getTextDocument().getUri();
+				for(Entry<String, Map<String, Module>> sl : languageSources.entrySet()) {
+					if (sl.getValue().containsKey(uri)) {
+						sl.getValue().remove(uri);
+						analyze(sl.getKey());
 					}
-				} catch (MalformedURLException e) {
-					e.printStackTrace();
 				}
 			}
 
 			@Override
 			public void didSave(DidSaveTextDocumentParams params) {
-				try {
-					Module M = new SourceURLModule(new URL(params.getTextDocument().getUri()));
-					for(Map.Entry<String, Set<Module>> sl : languageSources.entrySet()) {
-						if (sl.getValue().contains(M)) {
-							analyze(sl.getKey());
-						}
+				String uri = params.getTextDocument().getUri();
+				for(Entry<String, Map<String, Module>> sl : languageSources.entrySet()) {
+					if (sl.getValue().containsKey(uri)) {
+						analyze(sl.getKey());
 					}
-				} catch (MalformedURLException e) {
-					e.printStackTrace();
 				}
 			}
 
