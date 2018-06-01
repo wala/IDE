@@ -130,6 +130,7 @@ import com.ibm.wala.ipa.callgraph.propagation.LocalPointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PropagationCallGraphBuilder;
 import com.ibm.wala.ipa.slicer.NormalStatement;
+import com.ibm.wala.ipa.slicer.ParamCaller;
 import com.ibm.wala.ipa.slicer.SDG;
 import com.ibm.wala.ipa.slicer.Slicer;
 import com.ibm.wala.ipa.slicer.Slicer.ControlDependenceOptions;
@@ -468,8 +469,12 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 						Collection<Statement> deps = s.slice(new SDG<InstanceKey>(CG, cgBuilder.getPointerAnalysis(), DataDependenceOptions.FULL, ControlDependenceOptions.NONE), Collections.singleton(root), true);
 						for(Statement dep : deps) {
 							if (dep.getNode().getMethod() instanceof AstMethod) {
-								if (dep instanceof NormalStatement) {
-									Position depPos = ((AstMethod)dep.getNode().getMethod()).debugInfo().getInstructionPosition(((NormalStatement)dep).getInstructionIndex());
+								if ((dep instanceof NormalStatement) || (dep instanceof ParamCaller)) {
+									Position depPos = ((AstMethod)dep.getNode().getMethod()).debugInfo()
+										.getInstructionPosition(
+												dep instanceof NormalStatement?
+													((NormalStatement)dep).getInstructionIndex():
+													((ParamCaller)dep).getInstructionIndex());
 									DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
 									di.setLocation(locationFromWALA(depPos));
 									di.setMessage(new SourceBuffer(depPos).toString());
