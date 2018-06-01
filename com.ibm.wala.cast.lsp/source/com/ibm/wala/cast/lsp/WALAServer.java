@@ -126,10 +126,18 @@ import com.ibm.wala.ipa.callgraph.CallGraph;
 import com.ibm.wala.ipa.callgraph.propagation.HeapModel;
 import com.ibm.wala.ipa.callgraph.propagation.InstanceFieldKey;
 import com.ibm.wala.ipa.callgraph.propagation.InstanceKey;
+import com.ibm.wala.ipa.callgraph.propagation.LocalPointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PropagationCallGraphBuilder;
+import com.ibm.wala.ipa.slicer.NormalStatement;
+import com.ibm.wala.ipa.slicer.SDG;
+import com.ibm.wala.ipa.slicer.Slicer;
+import com.ibm.wala.ipa.slicer.Slicer.ControlDependenceOptions;
+import com.ibm.wala.ipa.slicer.Slicer.DataDependenceOptions;
+import com.ibm.wala.ipa.slicer.Statement;
 import com.ibm.wala.ssa.DefUse;
 import com.ibm.wala.ssa.IR;
+import com.ibm.wala.ssa.SSAAbstractInvokeInstruction;
 import com.ibm.wala.ssa.SSAInstruction;
 import com.ibm.wala.types.MethodReference;
 import com.ibm.wala.types.TypeReference;
@@ -445,17 +453,46 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				Location loc = locationFromWALA(pos);
 				d.setRange(loc.getRange());
 				d.setSource("Ariadne");
-				d.setSeverity(DiagnosticSeverity.Error);
+				d.setSeverity(e.getValue().severity());
+				
+				List<DiagnosticRelatedInformation> relList = new LinkedList<>();
+
+				if (values.containsKey(pos.getURL()) && values.get(pos.getURL()).containsKey(pos)) {
+					PointerKey messageVal = values.get(pos.getURL()).get(pos);
+					if (messageVal instanceof LocalPointerKey) {
+						LocalPointerKey lpk = (LocalPointerKey)messageVal;
+						CGNode node = lpk.getNode();
+						SSAInstruction def = node.getDU().getDef(lpk.getValueNumber());
+						NormalStatement root = new NormalStatement(node, def.iindex);
+						Slicer s = new Slicer();
+						Collection<Statement> deps = s.slice(new SDG<InstanceKey>(CG, cgBuilder.getPointerAnalysis(), DataDependenceOptions.FULL, ControlDependenceOptions.NONE), Collections.singleton(root), true);
+						for(Statement dep : deps) {
+							if (dep.getNode().getMethod() instanceof AstMethod) {
+								if (dep instanceof NormalStatement) {
+									Position depPos = ((AstMethod)dep.getNode().getMethod()).debugInfo().getInstructionPosition(((NormalStatement)dep).getInstructionIndex());
+									DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
+									di.setLocation(locationFromWALA(depPos));
+									di.setMessage(new SourceBuffer(depPos).toString());
+									relList.add(di);
+								}
+							}
+						}
+					}
+				}
+				
 				if (e.getValue().related() != null) {
-					List<DiagnosticRelatedInformation> relList = new LinkedList<>();
 					for (Pair<Position, String> related : e.getValue().related()) {
 						DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
 						di.setLocation(locationFromWALA(related.fst));
 						di.setMessage(related.snd);
 						relList.add(di);
 					}
+				}
+
+				if (! relList.isEmpty()) {
 					d.setRelatedInformation(relList);
 				}
+				
 				String uri = loc.getUri();
 				if (! diags.containsKey(uri)) {
 					diags.put(uri, new LinkedList<>());
@@ -468,6 +505,54 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				diags.get(uri).add(d);
 			}
 
+			CG.forEach((CGNode n) -> {
+				if (n.getMethod() instanceof AstMethod) {
+					n.iterateCallSites().forEachRemaining((CallSiteReference site) -> {
+						for(SSAAbstractInvokeInstruction inst : n.getIR().getCalls(site)) {
+							List<DiagnosticRelatedInformation> relList = new LinkedList<>();
+							CG.getPossibleTargets(n, site).forEach((CGNode callee) -> {
+								if (callee.getMethod() instanceof AstMethod) {
+									Position p = ((AstMethod)callee.getMethod()).getSourcePosition();
+									DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
+									di.setLocation(locationFromWALA(p));
+									di.setMessage("callee " + callee.getMethod());
+									relList.add(di);
+								}
+							});
+							if (! relList.isEmpty()) {
+								CG.getPredNodes(n).forEachRemaining((CGNode caller) -> {
+									if (caller.getMethod() instanceof AstMethod) {
+										CG.getPossibleSites(caller, n).forEachRemaining((CallSiteReference callerSite) -> {
+											for(SSAAbstractInvokeInstruction call : caller.getIR().getCalls(callerSite)) {
+												Position callerPos = ((AstMethod)caller.getMethod()).getSourcePosition(call.iindex);
+												DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
+												di.setLocation(locationFromWALA(callerPos));
+												di.setMessage("caller " + caller.getMethod());
+												relList.add(di);											
+											}
+										});
+									}
+								});
+
+								Position call = ((AstMethod)n.getMethod()).getSourcePosition(inst.iindex);
+								Diagnostic d = new Diagnostic();
+								Location callPos = locationFromWALA(call);
+								d.setRange(callPos.getRange());
+								d.setSeverity(DiagnosticSeverity.Information);
+								d.setSource("Ariadne");
+								d.setMessage("possible calls");
+								d.setRelatedInformation(relList);
+								String uri = callPos.getUri();
+								if (! diags.containsKey(uri)) {
+									diags.put(uri, new LinkedList<>());
+								}
+								diags.get(uri).add(d);
+							}
+						}
+					});
+				}
+			});
+			
 			for(Map.Entry<String,List<Diagnostic>> d : diags.entrySet()) {
 				PublishDiagnosticsParams pdp = new PublishDiagnosticsParams();
 				pdp.setUri(d.getKey());
