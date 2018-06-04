@@ -456,7 +456,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				d.setSource("Ariadne");
 				d.setSeverity(e.getValue().severity());
 				
-				List<DiagnosticRelatedInformation> relList = new LinkedList<>();
+				Set<DiagnosticRelatedInformation> relList = HashSetFactory.make();
 
 				if (values.containsKey(pos.getURL()) && values.get(pos.getURL()).containsKey(pos)) {
 					PointerKey messageVal = values.get(pos.getURL()).get(pos);
@@ -477,7 +477,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 													((ParamCaller)dep).getInstructionIndex());
 									DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
 									di.setLocation(locationFromWALA(depPos));
-									di.setMessage(new SourceBuffer(depPos).toString());
+									di.setMessage(new SourceBuffer(depPos).toString().replaceAll("[\\s]*[\\n][\\s]*", " "));
 									relList.add(di);
 								}
 							}
@@ -495,7 +495,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				}
 
 				if (! relList.isEmpty()) {
-					d.setRelatedInformation(relList);
+					d.setRelatedInformation(new LinkedList<>(relList));
 				}
 				
 				String uri = loc.getUri();
