@@ -130,6 +130,7 @@ import com.ibm.wala.ipa.callgraph.propagation.LocalPointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PointerKey;
 import com.ibm.wala.ipa.callgraph.propagation.PropagationCallGraphBuilder;
 import com.ibm.wala.ipa.slicer.NormalStatement;
+import com.ibm.wala.ipa.slicer.ParamCallee;
 import com.ibm.wala.ipa.slicer.ParamCaller;
 import com.ibm.wala.ipa.slicer.SDG;
 import com.ibm.wala.ipa.slicer.Slicer;
@@ -469,16 +470,34 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 						Collection<Statement> deps = s.slice(new SDG<InstanceKey>(CG, cgBuilder.getPointerAnalysis(), DataDependenceOptions.FULL, ControlDependenceOptions.NONE), Collections.singleton(root), true);
 						for(Statement dep : deps) {
 							if (dep.getNode().getMethod() instanceof AstMethod) {
-								if ((dep instanceof NormalStatement) || (dep instanceof ParamCaller)) {
-									Position depPos = ((AstMethod)dep.getNode().getMethod()).debugInfo()
-										.getInstructionPosition(
-												dep instanceof NormalStatement?
-													((NormalStatement)dep).getInstructionIndex():
-													((ParamCaller)dep).getInstructionIndex());
-									DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
-									di.setLocation(locationFromWALA(depPos));
-									di.setMessage(new SourceBuffer(depPos).toString().replaceAll("[\\s]*[\\n][\\s]*", " "));
-									relList.add(di);
+								if ((dep instanceof NormalStatement) || (dep instanceof ParamCaller) || (dep instanceof ParamCallee)) {
+									DebuggingInformation debugInfo = ((AstMethod)dep.getNode().getMethod()).debugInfo();
+									Position depPos = null;
+									if (dep instanceof NormalStatement) {
+										depPos = debugInfo.getInstructionPosition(((NormalStatement)dep).getInstructionIndex());
+									}  else if (dep instanceof ParamCaller) {
+										ParamCaller clr = (ParamCaller) dep;
+										int vn = clr.getValueNumber();
+										SSAAbstractInvokeInstruction inst = clr.getInstruction();
+										for(int i = 0; i < inst.getNumberOfUses(); i++) {
+											if (vn == inst.getUse(i)) {
+												depPos = debugInfo.getOperandPosition(inst.iindex, i);
+												break;
+											}
+										}
+									}  else {
+										assert dep instanceof ParamCallee;
+										ParamCallee cle = (ParamCallee) dep;
+										AstMethod m = (AstMethod) cle.getNode().getMethod();
+										depPos = m.getParameterPosition(cle.getValueNumber()-1);
+									}
+
+									if (depPos != null) {
+										DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
+										di.setLocation(locationFromWALA(depPos));
+										di.setMessage(new SourceBuffer(depPos).toString().replaceAll("[\\s]*[\\n][\\s]*", " "));
+										relList.add(di);
+									}
 								}
 							}
 						}
