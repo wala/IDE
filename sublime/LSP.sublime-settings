@@ -1,0 +1,16 @@
+// Settings in here override those in "LSP/LSP.sublime-settings",
+
+{
+	"clients": {
+		"wala": {
+			"command": ["/Library/Java/JavaVirtualMachines/jdk1.8.0_151.jdk/Contents/Home/bin/java",
+			            "-cp", 
+			            "/Users/dolby/git/ML/com.ibm.wala.cast.python.ml/target/com.ibm.wala.cast.python.ml-0.0.1-SNAPSHOT.jar", 
+			            "com.ibm.wala.cast.python.ml.driver.PythonDriver"],
+	     	"scopes": ["source.python"],
+    	 	"syntaxes": ["Packages/Python/Python.sublime-syntax"],
+     	 	"languageId": "python"
+		}
+	}
+}
+
