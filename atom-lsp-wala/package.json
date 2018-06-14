@@ -27,6 +27,11 @@
     }
   },
   "providedServices": {
+      "code-actions": {
+	  "versions": {
+	      "0.1.0": "provideCodeActions"
+	  }
+      },
     "autocomplete.provider": {
       "versions": {
         "2.0.0": "provideAutocomplete"
