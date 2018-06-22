@@ -10,6 +10,8 @@
  *****************************************************************************/
 package com.ibm.wala.cast.lsp;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -37,12 +39,14 @@ import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-
+import org.apache.commons.io.input.TeeInputStream;
+import org.apache.commons.io.output.TeeOutputStream;
 import org.eclipse.lsp4j.ApplyWorkspaceEditParams;
 import org.eclipse.lsp4j.ClientCapabilities;
 import org.eclipse.lsp4j.CodeActionParams;
@@ -91,6 +95,7 @@ import org.eclipse.lsp4j.TextDocumentClientCapabilities;
 import org.eclipse.lsp4j.TextDocumentPositionParams;
 import org.eclipse.lsp4j.TextDocumentSyncKind;
 import org.eclipse.lsp4j.TextEdit;
+import org.eclipse.lsp4j.WillSaveTextDocumentParams;
 import org.eclipse.lsp4j.WorkspaceEdit;
 import org.eclipse.lsp4j.WorkspaceSymbolParams;
 import org.eclipse.lsp4j.jsonrpc.Launcher;
@@ -579,9 +584,11 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			
 			for(Map.Entry<String,List<Diagnostic>> d : diags.entrySet()) {
 				PublishDiagnosticsParams pdp = new PublishDiagnosticsParams();
-				pdp.setUri(d.getKey());
-				pdp.setDiagnostics(d.getValue());
-				client.publishDiagnostics(pdp);
+				if (d.getValue() != null && !d.getValue().isEmpty()) {
+					pdp.setUri(d.getKey());
+					pdp.setDiagnostics(d.getValue());
+					client.publishDiagnostics(pdp);
+				}
 			}
 
 		} catch (IOException | IllegalArgumentException | CancelException e) {
@@ -853,19 +860,23 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			@Override
 			public CompletableFuture<List<? extends Command>> codeAction(CodeActionParams params) {
 				return CompletableFuture.supplyAsync(() -> {
-					if (params.getContext().getDiagnostics().toString().contains("possible fix:")) {
-						Range fixRange = params.getRange();
-						Command fix = new Command();
-						fix.setCommand(WalaCommand.FIXES.toString());
-						String message = params.getContext().getDiagnostics().get(0).getMessage();
-						fix.setTitle(extractFix(message));
-						List<Object> args = new LinkedList<Object>(params.getContext().getDiagnostics());
-						args.add(0, params.getTextDocument().getUri());
-						fix.setArguments(args);
-						return Collections.singletonList(fix);					
-					} else {
-						return Collections.emptyList();
-					}
+					Range fixRange = params.getRange();
+					Command fix = new Command();
+					fix.setCommand(WalaCommand.FIXES.toString());
+					for(Diagnostic d : params.getContext().getDiagnostics()) {
+						if (d.toString().contains("possible fix:")) {
+							if (within(d.getRange(), fixRange)) {
+								String message = d.getMessage();
+								fix.setTitle(extractFix(message));
+								List<Object> args = new LinkedList<Object>(params.getContext().getDiagnostics());
+								args.add(0, params.getTextDocument().getUri());
+								fix.setArguments(args);
+								return Collections.singletonList(fix);	
+							}
+						}
+					} 
+					
+					return Collections.emptyList();
 				});
 			}
 
@@ -949,7 +960,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			public void addCodeLensesForSymbol(WalaSymbolInformation sym, List<CodeLens> result) {
 				addTypesCodeLensesForSymbol(sym, result);
 				addAssignCodeLensesForSymbol(sym, result);
-				//				addRefsCodeLensesForSymbol(sym, result);
+				// addRefsCodeLensesForSymbol(sym, result);
 			}
 
 			@Override
@@ -1010,8 +1021,13 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public void didChange(DidChangeTextDocumentParams params) {
+				String uri = params.getTextDocument().getUri();
+				clearDiagnostics(uri);
+			}
+
+			private void clearDiagnostics(String uri) {
 				PublishDiagnosticsParams diagnostics = new PublishDiagnosticsParams();
-				diagnostics.setUri(params.getTextDocument().getUri());
+				diagnostics.setUri(uri);
 
 				client.publishDiagnostics(diagnostics);
 			}
@@ -1022,13 +1038,27 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				for(Entry<String, Map<String, Module>> sl : languageSources.entrySet()) {
 					if (sl.getValue().containsKey(uri)) {
 						sl.getValue().remove(uri);
-						analyze(sl.getKey());
+						if (! sl.getValue().isEmpty()) {
+							analyze(sl.getKey());
+						} else {
+							clearDiagnostics(uri);
+						}
 					}
 				}
 			}
 
 			@Override
 			public void didSave(DidSaveTextDocumentParams params) {
+				String uri = params.getTextDocument().getUri();
+				for(Entry<String, Map<String, Module>> sl : languageSources.entrySet()) {
+					if (sl.getValue().containsKey(uri)) {
+						analyze(sl.getKey());
+					}
+				}
+			}
+
+			@Override
+			public void willSave(WillSaveTextDocumentParams params) {
 				String uri = params.getTextDocument().getUri();
 				for(Entry<String, Map<String, Module>> sl : languageSources.entrySet()) {
 					if (sl.getValue().containsKey(uri)) {
@@ -1206,11 +1236,21 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				(a.getFirstLine() == b.getFirstLine() &&
 				a.getFirstCol() <= b.getFirstCol())) 
 				&&
-				(a.getLastLine() > a.getLastLine() ||
+				(a.getLastLine() > b.getLastLine() ||
 						(a.getLastLine() == b.getLastLine() &&
 						a.getLastCol() >= b.getLastCol()));
 	}
 
+	private boolean within(Range a, Range b) {
+		return (a.getStart().getLine() < b.getStart().getLine() ||
+				(a.getStart().getLine() == b.getStart().getLine()) &&
+				a.getStart().getCharacter() <= b.getStart().getCharacter())
+				&&
+				(a.getEnd().getLine() > b.getEnd().getLine() ||
+						(a.getEnd().getLine() == b.getEnd().getLine() &&
+						a.getEnd().getCharacter() >= b.getEnd().getCharacter()));
+	}
+	
 	private Position getNearest(NavigableMap<Position, ?> scriptPositions, Position pos) {
 		Entry<Position, ?> entry = scriptPositions.floorEntry(pos);
 		if (entry == null) {
@@ -1336,6 +1376,26 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		return serverPort;
 	}
 
+	static InputStream logStream(InputStream is, String logFileName) {
+		File log;
+		try {
+			log = File.createTempFile(logFileName, ".txt");
+			return new TeeInputStream(is, new FileOutputStream(log));
+		} catch (IOException e) {
+			return is;
+		}
+	}
+
+	static OutputStream logStream(OutputStream os, String logFileName) {
+		File log;
+		try {
+			log = File.createTempFile(logFileName, ".txt");
+			return new TeeOutputStream(os, new FileOutputStream(log));
+		} catch (IOException e) {
+			return os;
+		}
+	}
+
 	public static WALAServer launchOnServerPort(int port, Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages, boolean runAsDaemon) throws IOException {
 		ServerSocket ss = new ServerSocket(port);
 		WALAServer server = new WALAServer(languages, ss.getLocalPort()) {
@@ -1351,7 +1411,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					while (true) {
 						try {
 							Socket conn = ss.accept();
-							Launcher<LanguageClient> launcher = LSPLauncher.createServerLauncher(server, conn.getInputStream(), conn.getOutputStream());
+							Launcher<LanguageClient> launcher = 
+									LSPLauncher.createServerLauncher(server, 
+											logStream(conn.getInputStream(), "walaLspIn"),
+											logStream(conn.getOutputStream(), "walaLspOut"));
 							server.connect(launcher.getRemoteProxy());
 							launcher.startListening();
 						} catch (IOException e) {
@@ -1381,7 +1444,8 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			InputStream in,
 			OutputStream out) throws IOException {
 		WALAServer server = new WALAServer(languages);
-		Launcher<LanguageClient> launcher = LSPLauncher.createServerLauncher(server, in, out, true, new PrintWriter(System.err));
+		Launcher<LanguageClient> launcher = 
+			LSPLauncher.createServerLauncher(server, logStream(in, "wala.lsp.in"), logStream(out, "wala.lsp.out"), true, new PrintWriter(System.err));
 		server.connect(launcher.getRemoteProxy());
 		launcher.startListening();
 		return server;

@@ -13,3 +13,4 @@ Require-Bundle: com.ibm.wala.cast;bundle-version="1.4.4",
  org.eclipse.xtext.xbase.lib;bundle-version="2.12.0"
 Export-Package: com.ibm.wala.cast.lsp
 Automatic-Module-Name: com.ibm.wala.cast.lsp
+Import-Package: org.apache.commons.io.input
