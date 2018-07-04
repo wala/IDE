@@ -39,12 +39,12 @@ import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+
 import org.apache.commons.io.input.TeeInputStream;
 import org.apache.commons.io.output.TeeOutputStream;
 import org.eclipse.lsp4j.ApplyWorkspaceEditParams;
@@ -92,6 +92,7 @@ import org.eclipse.lsp4j.SignatureHelp;
 import org.eclipse.lsp4j.SymbolInformation;
 import org.eclipse.lsp4j.SymbolKind;
 import org.eclipse.lsp4j.TextDocumentClientCapabilities;
+import org.eclipse.lsp4j.TextDocumentItem;
 import org.eclipse.lsp4j.TextDocumentPositionParams;
 import org.eclipse.lsp4j.TextDocumentSyncKind;
 import org.eclipse.lsp4j.TextEdit;
@@ -124,7 +125,6 @@ import com.ibm.wala.classLoader.IClass;
 import com.ibm.wala.classLoader.IClassLoader;
 import com.ibm.wala.classLoader.IMethod;
 import com.ibm.wala.classLoader.Module;
-import com.ibm.wala.classLoader.SourceURLModule;
 import com.ibm.wala.client.AbstractAnalysisEngine;
 import com.ibm.wala.ipa.callgraph.CGNode;
 import com.ibm.wala.ipa.callgraph.CallGraph;
@@ -333,8 +333,12 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		URL url = pos.getURL();
 		try {
 			URI uri = url.toURI();
-			if(uri.getScheme().equalsIgnoreCase("file")) {
-				uri = Paths.get(uri).toUri();
+			try {
+				if(uri.getScheme().equalsIgnoreCase("file")) {
+					uri = Paths.get(uri).toUri();
+				}
+			} catch (Exception e) {
+				
 			}
 			return uri;
 		} catch(URISyntaxException e) {
@@ -592,7 +596,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			}
 
 		} catch (IOException | IllegalArgumentException | CancelException e) {
-
+			assert false : e;
 		}
 	}
 
@@ -735,7 +739,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			public CompletableFuture<Hover> hover(TextDocumentPositionParams position) { 
 				return CompletableFuture.supplyAsync(() -> {
 					try {
-						Position lookupPos = lookupPos(position.getPosition(), new URI(position.getTextDocument().getUri()).toURL());
+						String uri = position.getTextDocument().getUri();
+						URL url = 
+							new URI(uri.contains("/")? uri : "file://" + uri).toURL();
+						Position lookupPos = lookupPos(position.getPosition(), url);
 						final String hoverMarkupKind = getHoverFormatRequested();
 						final boolean hoverKind = MarkupKind.MARKDOWN.equals(hoverMarkupKind);
 						String msg = positionToString(lookupPos, hoverKind);
@@ -968,8 +975,18 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				return CompletableFuture.supplyAsync(() -> {
 					List<CodeLens> result = new LinkedList<CodeLens>();
 					String document = params.getTextDocument().getUri();
-					for(WalaSymbolInformation sym : documentSymbols.get(document).values()) {
-						addCodeLensesForSymbol(sym, result);
+					if (documentSymbols.containsKey(document)) {
+						for(WalaSymbolInformation sym : documentSymbols.get(document).values()) {
+							addCodeLensesForSymbol(sym, result);
+						}
+					} else {
+						document = "file://" + document;
+						if (documentSymbols.containsKey(document)) {
+							for(WalaSymbolInformation sym : documentSymbols.get(document).values()) {
+								addCodeLensesForSymbol(sym, result);
+							}
+						}
+
 					}
 					return result;
 				});
@@ -1007,14 +1024,11 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public void didOpen(DidOpenTextDocumentParams params) {
-				try {
-					String language = params.getTextDocument().getLanguageId();
-					String uri = params.getTextDocument().getUri();
-					if (addSource(language, uri, new SourceURLModule(new URL(uri)))) {
-						analyze(language);
-					}
-				} catch (MalformedURLException e) {
-					e.printStackTrace();
+				TextDocumentItem doc = params.getTextDocument();
+				String language = doc.getLanguageId();
+				String uri = doc.getUri();
+				if (addSource(language, uri, new LSPStringModule(uri, doc.getText()))) {
+					analyze(language);
 				}
 			}
 
@@ -1460,7 +1474,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			}
 		};
 
-		Launcher<LanguageClient> launcher = LSPLauncher.createServerLauncher(server, conn.getInputStream(), conn.getOutputStream());
+		Launcher<LanguageClient> launcher = LSPLauncher.createServerLauncher(server, logStream(conn.getInputStream(), "wala.lsp.in"), logStream(conn.getOutputStream(), "wala.lsp.out"));
 		server.connect(launcher.getRemoteProxy());
 		launcher.startListening();
 		return server;
