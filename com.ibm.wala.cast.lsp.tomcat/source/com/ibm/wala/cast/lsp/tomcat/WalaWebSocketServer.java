@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
+import javax.websocket.EncodeException;
 import javax.websocket.OnClose;
 import javax.websocket.OnError;
 import javax.websocket.OnMessage;
@@ -60,7 +61,11 @@ public class WalaWebSocketServer {
 			@Override
 			public void consume(Message arg0) throws MessageIssueException, JsonRpcException {
 				System.err.println("sending message: " + arg0);
-				session.getAsyncRemote().sendObject(arg0);
+				try {
+					session.getBasicRemote().sendText(arg0.toString());
+				} catch (IOException e) {
+					throw new Error(e);
+				}
 			}
 		};
 		
