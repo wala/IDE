@@ -172,7 +172,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	private final Set<Pair<String,BiFunction<Boolean,int[],String>>> instructionAnalyses = HashSetFactory.make();
 
 	private Function<int[],Set<Position>> findDefinitionAnalysis = null;
-
+	
 	public boolean addSource(String language, String url, Module file) {
 		if (! languageSources.containsKey(language)) {
 			languageSources.put(language, HashMapFactory.make());
@@ -321,7 +321,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	private Location locationFromWALA(Position walaCodePosition) {
 		Location codeLocation = new Location();
-		codeLocation.setUri(getPositionUri(walaCodePosition).toString());
+		codeLocation.setUri(Util.unmangleUri(walaCodePosition.getURL().toString()));
 		Range codeRange = new Range();
 		codeRange.setStart(positionFromWALA(walaCodePosition::getFirstLine, walaCodePosition::getFirstCol));
 		codeRange.setEnd(positionFromWALA(walaCodePosition::getLastLine, walaCodePosition::getLastCol));
@@ -589,7 +589,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			for(Map.Entry<String,List<Diagnostic>> d : diags.entrySet()) {
 				PublishDiagnosticsParams pdp = new PublishDiagnosticsParams();
 				if (d.getValue() != null && !d.getValue().isEmpty()) {
-					pdp.setUri(d.getKey());
+					pdp.setUri(Util.unmangleUri(d.getKey()));
 					pdp.setDiagnostics(d.getValue());
 					client.publishDiagnostics(pdp);
 				}
@@ -739,9 +739,8 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			public CompletableFuture<Hover> hover(TextDocumentPositionParams position) { 
 				return CompletableFuture.supplyAsync(() -> {
 					try {
-						String uri = position.getTextDocument().getUri();
-						URL url = 
-							new URI(uri.contains("/")? uri : "file://" + uri).toURL();
+						String uri = Util.mangleUri(position.getTextDocument().getUri());
+						URL url = new URI(uri).toURL();
 						Position lookupPos = lookupPos(position.getPosition(), url);
 						final String hoverMarkupKind = getHoverFormatRequested();
 						final boolean hoverKind = MarkupKind.MARKDOWN.equals(hoverMarkupKind);
@@ -776,7 +775,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 						if (findDefinitionAnalysis == null) {
 							return null;
 						}
-						Position pos = lookupPos(position.getPosition(), new URI(position.getTextDocument().getUri()).toURL());
+						Position pos = lookupPos(position.getPosition(), new URI(Util.mangleUri(position.getTextDocument().getUri())).toURL());
 
 						if (instructions.containsKey(pos.getURL())) {
 							NavigableMap<Position, int[]> scriptPositions = instructions.get(pos.getURL());
@@ -812,7 +811,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				return CompletableFuture.supplyAsync(() -> {
 					Set<Location> result = HashSetFactory.make();
 					org.eclipse.lsp4j.Position pos = params.getPosition();
-					String file = params.getTextDocument().getUri();
+					String file = Util.mangleUri(params.getTextDocument().getUri());
 					if (documentSymbols.containsKey(file)) {
 						Collection<WalaSymbolInformation> symbols = documentSymbols.get(file).values();
 						for(WalaSymbolInformation symbol : symbols) {
@@ -855,7 +854,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			@Override
 			public CompletableFuture<List<? extends SymbolInformation>> documentSymbol(DocumentSymbolParams params) {
 				return CompletableFuture.supplyAsync(() -> {
-					String document = params.getTextDocument().getUri();
+					String document = Util.mangleUri(params.getTextDocument().getUri());
 					if (! documentSymbols.containsKey(document)) {
 						return Collections.emptyList();
 					} else {
@@ -974,20 +973,12 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			public CompletableFuture<List<? extends CodeLens>> codeLens(CodeLensParams params) {
 				return CompletableFuture.supplyAsync(() -> {
 					List<CodeLens> result = new LinkedList<CodeLens>();
-					String document = params.getTextDocument().getUri();
+					String document = Util.mangleUri(params.getTextDocument().getUri());
 					if (documentSymbols.containsKey(document)) {
 						for(WalaSymbolInformation sym : documentSymbols.get(document).values()) {
 							addCodeLensesForSymbol(sym, result);
 						}
-					} else {
-						document = "file://" + document;
-						if (documentSymbols.containsKey(document)) {
-							for(WalaSymbolInformation sym : documentSymbols.get(document).values()) {
-								addCodeLensesForSymbol(sym, result);
-							}
-						}
-
-					}
+					} 
 					return result;
 				});
 			}
@@ -1026,7 +1017,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			public void didOpen(DidOpenTextDocumentParams params) {
 				TextDocumentItem doc = params.getTextDocument();
 				String language = doc.getLanguageId();
-				String uri = doc.getUri();
+				String uri = Util.mangleUri(doc.getUri());
 				if (addSource(language, uri, new LSPStringModule(uri, doc.getText()))) {
 					analyze(language);
 				}
@@ -1035,20 +1026,20 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public void didChange(DidChangeTextDocumentParams params) {
-				String uri = params.getTextDocument().getUri();
+				String uri = Util.mangleUri(params.getTextDocument().getUri());
 				clearDiagnostics(uri);
 			}
 
 			private void clearDiagnostics(String uri) {
 				PublishDiagnosticsParams diagnostics = new PublishDiagnosticsParams();
-				diagnostics.setUri(uri);
+				diagnostics.setUri(Util.unmangleUri(uri));
 
 				client.publishDiagnostics(diagnostics);
 			}
 
 			@Override
 			public void didClose(DidCloseTextDocumentParams params) {
-				String uri = params.getTextDocument().getUri();
+				String uri = Util.mangleUri(params.getTextDocument().getUri());
 				for(Entry<String, Map<String, Module>> sl : languageSources.entrySet()) {
 					if (sl.getValue().containsKey(uri)) {
 						sl.getValue().remove(uri);
@@ -1063,7 +1054,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public void didSave(DidSaveTextDocumentParams params) {
-				String uri = params.getTextDocument().getUri();
+				String uri = Util.mangleUri(params.getTextDocument().getUri());
 				for(Entry<String, Map<String, Module>> sl : languageSources.entrySet()) {
 					if (sl.getValue().containsKey(uri)) {
 						analyze(sl.getKey());
@@ -1073,7 +1064,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 			@Override
 			public void willSave(WillSaveTextDocumentParams params) {
-				String uri = params.getTextDocument().getUri();
+				String uri = Util.mangleUri(params.getTextDocument().getUri());
 				for(Entry<String, Map<String, Module>> sl : languageSources.entrySet()) {
 					if (sl.getValue().containsKey(uri)) {
 						analyze(sl.getKey());

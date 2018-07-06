@@ -4,6 +4,8 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.Iterator;
 
@@ -18,20 +20,13 @@ public class LSPStringModule implements Module, ModuleEntry, SourceModule {
 	private final String contents;
 
 	public LSPStringModule(String fileName, String contents) {
+		this.fileName = Util.mangleUri(fileName);
 		URL url = null;
-		String fn = null;
 		try {
-			url = new URL(fileName);
-			fn = fileName;
-		} catch (MalformedURLException e) {
-			fn = "file://" + (fileName.contains("/")? fileName.substring(fileName.lastIndexOf('/')): fileName);
-			try {
-				url = new URL(fn);
-			} catch (MalformedURLException e1) {
-				assert false : e1;
-			}
+			url = new URI(this.fileName).toURL();
+		} catch (MalformedURLException | URISyntaxException e) {
+			assert false : e;
 		}
-		this.fileName = fn;
 		this.fileURL = url;
 		this.contents = contents;
 	}
