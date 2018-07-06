@@ -29,6 +29,8 @@ import org.eclipse.lsp4j.jsonrpc.messages.ResponseMessage;
 import org.eclipse.lsp4j.jsonrpc.services.GenericEndpoint;
 import org.eclipse.lsp4j.jsonrpc.services.ServiceEndpoints;
 import org.eclipse.lsp4j.services.LanguageClient;
+import org.eclipse.lsp4j.services.LanguageClientAware;
+import org.eclipse.lsp4j.services.LanguageServer;
 
 import com.ibm.wala.cast.lsp.WALAServer;
 import com.ibm.wala.cast.python.ml.driver.PythonDriver;
@@ -52,8 +54,8 @@ public class WalaWebSocketServer {
     public void onOpen(Session session) throws IOException{
         System.out.println("Open Connection " + session + " ...");
 
-        WALAServer wala = new WALAServer(PythonDriver.python);
-		Endpoint local = new GenericEndpoint(Collections.singleton(wala));
+        LanguageServer server = new WALAServer(PythonDriver.python);
+		Endpoint local = new GenericEndpoint(Collections.singleton(server));
 		endpoints.put(session, local);
 
 		MessageConsumer out = new MessageConsumer() {
@@ -68,8 +70,10 @@ public class WalaWebSocketServer {
 			}
 		};
 		
-		RemoteEndpoint remote = new RemoteEndpoint(out, local);
-		wala.connect(ServiceEndpoints.toServiceObject(remote, LanguageClient.class));
+		if (server instanceof LanguageClientAware) {
+			RemoteEndpoint remote = new RemoteEndpoint(out, local);
+			((LanguageClientAware)server).connect(ServiceEndpoints.toServiceObject(remote, LanguageClient.class));
+		}
     }
 
     @OnClose
