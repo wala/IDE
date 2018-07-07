@@ -65,20 +65,20 @@ public class LSPWebSocketServer<T extends LanguageServer> {
         LanguageServer server = newServer.get();
 		Endpoint local = new GenericEndpoint(Collections.singleton(server));
 		endpoints.put(session, local);
-
-		MessageConsumer out = new MessageConsumer() {
-			@Override
-			public void consume(Message arg0) throws MessageIssueException, JsonRpcException {
-				System.err.println("sending message: " + arg0);
-				try {
-					session.getBasicRemote().sendText(arg0.toString());
-				} catch (IOException e) {
-					throw new Error(e);
-				}
-			}
-		};
 		
 		if (server instanceof LanguageClientAware) {
+			MessageConsumer out = new MessageConsumer() {
+				@Override
+				public void consume(Message arg0) throws MessageIssueException, JsonRpcException {
+					System.err.println("sending message: " + arg0);
+					try {
+						session.getBasicRemote().sendText(arg0.toString());
+					} catch (IOException e) {
+						throw new Error(e);
+					}
+				}
+			};
+
 			RemoteEndpoint remote = new RemoteEndpoint(out, local);
 			((LanguageClientAware)server).connect(ServiceEndpoints.toServiceObject(remote, LanguageClient.class));
 		}
