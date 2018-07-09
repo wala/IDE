@@ -8,8 +8,8 @@ Bundle-RequiredExecutionEnvironment: JavaSE-1.8
 Require-Bundle: com.ibm.wala.cast;bundle-version="1.4.4",
  com.ibm.wala.core;bundle-version="1.4.4",
  com.ibm.wala.shrike;bundle-version="1.4.4",
- org.eclipse.lsp4j,
- org.eclipse.lsp4j.jsonrpc,
+ org.eclipse.lsp4j;bundle-version="0.4.1",
+ org.eclipse.lsp4j.jsonrpc;bundle-version="0.4.1",
  org.eclipse.xtext.xbase.lib;bundle-version="2.12.0"
 Export-Package: com.ibm.wala.cast.lsp
 Automatic-Module-Name: com.ibm.wala.cast.lsp
