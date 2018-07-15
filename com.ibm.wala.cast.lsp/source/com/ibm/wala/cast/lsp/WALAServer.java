@@ -321,7 +321,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	private Location locationFromWALA(Position walaCodePosition) {
 		Location codeLocation = new Location();
-		codeLocation.setUri(Util.unmangleUri(walaCodePosition.getURL().toString()));
+		codeLocation.setUri(Util.unmangleUri(getPositionUri(walaCodePosition).toString()));
 		Range codeRange = new Range();
 		codeRange.setStart(positionFromWALA(walaCodePosition::getFirstLine, walaCodePosition::getFirstCol));
 		codeRange.setEnd(positionFromWALA(walaCodePosition::getLastLine, walaCodePosition::getLastCol));
