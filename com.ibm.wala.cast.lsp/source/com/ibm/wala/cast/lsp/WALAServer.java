@@ -364,7 +364,36 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 		}
 	}
 
+	public static Map<String, List<Diagnostic>> getDiagnostics(Function<WALAServer, 
+	Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages,
+	String language, Map<String, String> uriTextPairs) {
+		WALAServer server = new WALAServer(languages);
+
+		for(Entry<String, String> pair : uriTextPairs.entrySet()) {
+			final String uri  = pair.getKey();
+			final String text = pair.getValue();
+			if(!server.addSource(language, uri, new LSPStringModule(uri, text))) {
+				return null;
+			}
+		}
+
+		Map<String, List<Diagnostic>> diags = server.calculateDiagnostics(language);
+		return diags;
+	}
+
 	public void analyze(String language) {
+		Map<String, List<Diagnostic>> diags = calculateDiagnostics(language);
+		for(Map.Entry<String,List<Diagnostic>> d : diags.entrySet()) {
+			PublishDiagnosticsParams pdp = new PublishDiagnosticsParams();
+			if (d.getValue() != null && !d.getValue().isEmpty()) {
+				pdp.setUri(Util.unmangleUri(d.getKey()));
+				pdp.setDiagnostics(d.getValue());
+				client.publishDiagnostics(pdp);
+			}
+		}
+	}
+
+	private Map<String, List<Diagnostic>> calculateDiagnostics(String language) {
 		try {
 			if (valueErrors.containsKey(language)) {
 				valueErrors.get(language).clear();
@@ -586,17 +615,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				}
 			});
 			
-			for(Map.Entry<String,List<Diagnostic>> d : diags.entrySet()) {
-				PublishDiagnosticsParams pdp = new PublishDiagnosticsParams();
-				if (d.getValue() != null && !d.getValue().isEmpty()) {
-					pdp.setUri(Util.unmangleUri(d.getKey()));
-					pdp.setDiagnostics(d.getValue());
-					client.publishDiagnostics(pdp);
-				}
-			}
-
+		return diags;
 		} catch (IOException | IllegalArgumentException | CancelException e) {
 			assert false : e;
+			return null;
 		}
 	}
 
