@@ -489,9 +489,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				Diagnostic d = new Diagnostic();
 				// Diagnostics do not currently support markdown
 				d.setMessage(e.getValue().toString(false));
+				
 				Position pos = e.getValue().position();
-				Location loc = locationFromWALA(pos);
-				d.setRange(loc.getRange());
+				d.setRange(locationFromWALA(pos).getRange());
+			
 				d.setSource("Ariadne");
 				d.setSeverity(e.getValue().severity());
 				
@@ -555,7 +556,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					d.setRelatedInformation(new LinkedList<>(relList));
 				}
 				
-				String uri = loc.getUri();
+				String uri = Util.unmangleUri(getPositionUri(pos).toString());
 				if (! diags.containsKey(uri)) {
 					diags.put(uri, new LinkedList<>());
 				}
