@@ -7,7 +7,7 @@ class WalaLanguageClient extends AutoLanguageClient {
     getServerName () { return 'Ariadne' }
 
     startServerProcess (projectPath) {
-	return cp.spawn('/Library/Java/JavaVirtualMachines/jdk1.8.0_151.jdk/Contents/Home/bin/java', ['-cp', '/Users/dolby/git/ML/com.ibm.wala.cast.python.ml/target/com.ibm.wala.cast.python.ml-0.0.1-SNAPSHOT.jar', '-Dpython.import.site=false', 'com.ibm.wala.cast.python.ml.driver.PythonDriver']);
+	return cp.spawn('/Library/Java/JavaVirtualMachines/jdk1.8.0_151.jdk/Contents/Home/bin/java', ['-Dpython.import.site=false', '-jar', '/Users/dolby/git/ML/com.ibm.wala.cast.python.ml/target/com.ibm.wala.cast.python.ml-0.0.1-SNAPSHOT.jar', '--mode', 'stdio']);
     }
 }
 

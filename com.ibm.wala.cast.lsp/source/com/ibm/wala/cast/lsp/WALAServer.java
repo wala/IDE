@@ -496,66 +496,68 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				d.setSource("Ariadne");
 				d.setSeverity(e.getValue().severity());
 				
-				Set<DiagnosticRelatedInformation> relList = HashSetFactory.make();
+				if (supportsRelatedInformation()) {
+					Set<DiagnosticRelatedInformation> relList = HashSetFactory.make();
 
-				if (values.containsKey(pos.getURL()) && values.get(pos.getURL()).containsKey(pos)) {
-					PointerKey messageVal = values.get(pos.getURL()).get(pos);
-					if (messageVal instanceof LocalPointerKey) {
-						LocalPointerKey lpk = (LocalPointerKey)messageVal;
-						CGNode node = lpk.getNode();
-						SSAInstruction def = node.getDU().getDef(lpk.getValueNumber());
-						NormalStatement root = new NormalStatement(node, def.iindex);
-						Slicer s = new Slicer();
-						Collection<Statement> deps = s.slice(new SDG<InstanceKey>(CG, cgBuilder.getPointerAnalysis(), DataDependenceOptions.FULL, ControlDependenceOptions.NONE), Collections.singleton(root), true);
-						for(Statement dep : deps) {
-							if (dep.getNode().getMethod() instanceof AstMethod) {
-								if ((dep instanceof NormalStatement) || (dep instanceof ParamCaller) || (dep instanceof ParamCallee)) {
-									DebuggingInformation debugInfo = ((AstMethod)dep.getNode().getMethod()).debugInfo();
-									Position depPos = null;
-									if (dep instanceof NormalStatement) {
-										depPos = debugInfo.getInstructionPosition(((NormalStatement)dep).getInstructionIndex());
-									}  else if (dep instanceof ParamCaller) {
-										ParamCaller clr = (ParamCaller) dep;
-										int vn = clr.getValueNumber();
-										SSAAbstractInvokeInstruction inst = clr.getInstruction();
-										for(int i = 0; i < inst.getNumberOfUses(); i++) {
-											if (vn == inst.getUse(i)) {
-												depPos = debugInfo.getOperandPosition(inst.iindex, i);
-												break;
+					if (values.containsKey(pos.getURL()) && values.get(pos.getURL()).containsKey(pos)) {
+						PointerKey messageVal = values.get(pos.getURL()).get(pos);
+						if (messageVal instanceof LocalPointerKey) {
+							LocalPointerKey lpk = (LocalPointerKey)messageVal;
+							CGNode node = lpk.getNode();
+							SSAInstruction def = node.getDU().getDef(lpk.getValueNumber());
+							NormalStatement root = new NormalStatement(node, def.iindex);
+							Slicer s = new Slicer();
+							Collection<Statement> deps = s.slice(new SDG<InstanceKey>(CG, cgBuilder.getPointerAnalysis(), DataDependenceOptions.FULL, ControlDependenceOptions.NONE), Collections.singleton(root), true);
+							for(Statement dep : deps) {
+								if (dep.getNode().getMethod() instanceof AstMethod) {
+									if ((dep instanceof NormalStatement) || (dep instanceof ParamCaller) || (dep instanceof ParamCallee)) {
+										DebuggingInformation debugInfo = ((AstMethod)dep.getNode().getMethod()).debugInfo();
+										Position depPos = null;
+										if (dep instanceof NormalStatement) {
+											depPos = debugInfo.getInstructionPosition(((NormalStatement)dep).getInstructionIndex());
+										}  else if (dep instanceof ParamCaller) {
+											ParamCaller clr = (ParamCaller) dep;
+											int vn = clr.getValueNumber();
+											SSAAbstractInvokeInstruction inst = clr.getInstruction();
+											for(int i = 0; i < inst.getNumberOfUses(); i++) {
+												if (vn == inst.getUse(i)) {
+													depPos = debugInfo.getOperandPosition(inst.iindex, i);
+													break;
+												}
 											}
+										}  else {
+											assert dep instanceof ParamCallee;
+											ParamCallee cle = (ParamCallee) dep;
+											AstMethod m = (AstMethod) cle.getNode().getMethod();
+											depPos = m.getParameterPosition(cle.getValueNumber()-1);
 										}
-									}  else {
-										assert dep instanceof ParamCallee;
-										ParamCallee cle = (ParamCallee) dep;
-										AstMethod m = (AstMethod) cle.getNode().getMethod();
-										depPos = m.getParameterPosition(cle.getValueNumber()-1);
-									}
 
-									if (depPos != null) {
-										DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
-										di.setLocation(locationFromWALA(depPos));
-										di.setMessage(new SourceBuffer(depPos).toString().replaceAll("[\\s]*[\\n][\\s]*", " "));
-										relList.add(di);
+										if (depPos != null) {
+											DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
+											di.setLocation(locationFromWALA(depPos));
+											di.setMessage(new SourceBuffer(depPos).toString().replaceAll("[\\s]*[\\n][\\s]*", " "));
+											relList.add(di);
+										}
 									}
 								}
 							}
 						}
 					}
-				}
-				
-				if (e.getValue().related() != null) {
-					for (Pair<Position, String> related : e.getValue().related()) {
-						DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
-						di.setLocation(locationFromWALA(related.fst));
-						di.setMessage(related.snd);
-						relList.add(di);
+
+					if (e.getValue().related() != null) {
+						for (Pair<Position, String> related : e.getValue().related()) {
+							DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
+							di.setLocation(locationFromWALA(related.fst));
+							di.setMessage(related.snd);
+							relList.add(di);
+						}
+					}
+
+					if (! relList.isEmpty()) {
+						d.setRelatedInformation(new LinkedList<>(relList));
 					}
 				}
 
-				if (! relList.isEmpty()) {
-					d.setRelatedInformation(new LinkedList<>(relList));
-				}
-				
 				String uri = Util.unmangleUri(getPositionUri(pos).toString());
 				if (! diags.containsKey(uri)) {
 					diags.put(uri, new LinkedList<>());
@@ -568,59 +570,65 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				diags.get(uri).add(d);
 			}
 
-			CG.forEach((CGNode n) -> {
-				if (n.getMethod() instanceof AstMethod) {
-					n.iterateCallSites().forEachRemaining((CallSiteReference site) -> {
-						for(SSAAbstractInvokeInstruction inst : n.getIR().getCalls(site)) {
-							List<DiagnosticRelatedInformation> relList = new LinkedList<>();
-							CG.getPossibleTargets(n, site).forEach((CGNode callee) -> {
-								if (callee.getMethod() instanceof AstMethod) {
-									Position p = ((AstMethod)callee.getMethod()).getSourcePosition();
-									DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
-									di.setLocation(locationFromWALA(p));
-									di.setMessage("callee " + callee.getMethod());
-									relList.add(di);
-								}
-							});
-							if (! relList.isEmpty()) {
-								CG.getPredNodes(n).forEachRemaining((CGNode caller) -> {
-									if (caller.getMethod() instanceof AstMethod) {
-										CG.getPossibleSites(caller, n).forEachRemaining((CallSiteReference callerSite) -> {
-											for(SSAAbstractInvokeInstruction call : caller.getIR().getCalls(callerSite)) {
-												Position callerPos = ((AstMethod)caller.getMethod()).getSourcePosition(call.iindex);
-												DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
-												di.setLocation(locationFromWALA(callerPos));
-												di.setMessage("caller " + caller.getMethod());
-												relList.add(di);											
-											}
-										});
+			if (supportsRelatedInformation()) {
+				CG.forEach((CGNode n) -> {
+					if (n.getMethod() instanceof AstMethod) {
+						n.iterateCallSites().forEachRemaining((CallSiteReference site) -> {
+							for(SSAAbstractInvokeInstruction inst : n.getIR().getCalls(site)) {
+								List<DiagnosticRelatedInformation> relList = new LinkedList<>();
+								CG.getPossibleTargets(n, site).forEach((CGNode callee) -> {
+									if (callee.getMethod() instanceof AstMethod) {
+										Position p = ((AstMethod)callee.getMethod()).getSourcePosition();
+										DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
+										di.setLocation(locationFromWALA(p));
+										di.setMessage("callee " + callee.getMethod());
+										relList.add(di);
 									}
 								});
+								if (! relList.isEmpty()) {
+									CG.getPredNodes(n).forEachRemaining((CGNode caller) -> {
+										if (caller.getMethod() instanceof AstMethod) {
+											CG.getPossibleSites(caller, n).forEachRemaining((CallSiteReference callerSite) -> {
+												for(SSAAbstractInvokeInstruction call : caller.getIR().getCalls(callerSite)) {
+													Position callerPos = ((AstMethod)caller.getMethod()).getSourcePosition(call.iindex);
+													DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
+													di.setLocation(locationFromWALA(callerPos));
+													di.setMessage("caller " + caller.getMethod());
+													relList.add(di);											
+												}
+											});
+										}
+									});
 
-								Position call = ((AstMethod)n.getMethod()).getSourcePosition(inst.iindex);
-								Diagnostic d = new Diagnostic();
-								Location callPos = locationFromWALA(call);
-								d.setRange(callPos.getRange());
-								d.setSeverity(DiagnosticSeverity.Information);
-								d.setSource("Ariadne");
-								d.setMessage("possible calls");
-								d.setRelatedInformation(relList);
-								String uri = callPos.getUri();
-								if (! diags.containsKey(uri)) {
-									diags.put(uri, new LinkedList<>());
+									Position call = ((AstMethod)n.getMethod()).getSourcePosition(inst.iindex);
+									Diagnostic d = new Diagnostic();
+									Location callPos = locationFromWALA(call);
+									d.setRange(callPos.getRange());
+									d.setSeverity(DiagnosticSeverity.Information);
+									d.setSource("Ariadne");
+									d.setMessage("possible calls");
+									d.setRelatedInformation(relList);
+									String uri = callPos.getUri();
+									if (! diags.containsKey(uri)) {
+										diags.put(uri, new LinkedList<>());
+									}
+									diags.get(uri).add(d);
 								}
-								diags.get(uri).add(d);
 							}
-						}
-					});
-				}
-			});
+						});
+					}
+				});
+			}
 			
-		return diags;
+			return diags;
 		} catch (IOException | IllegalArgumentException | CancelException e) {
 			assert false : e;
 			return null;
 		}
+	}
+
+	private Boolean supportsRelatedInformation() {
+		return initializeParams == null || initializeParams.getCapabilities().getTextDocument().getPublishDiagnostics().getRelatedInformation();
 	}
 
 	public WALAServer(Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages) {
