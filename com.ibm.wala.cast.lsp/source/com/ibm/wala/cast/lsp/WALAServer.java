@@ -628,7 +628,11 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	}
 
 	private Boolean supportsRelatedInformation() {
-		return initializeParams == null || initializeParams.getCapabilities().getTextDocument().getPublishDiagnostics().getRelatedInformation();
+		return initializeParams == null || 
+			initializeParams.getCapabilities() == null ||
+			initializeParams.getCapabilities().getTextDocument() == null ||
+			initializeParams.getCapabilities().getTextDocument().getPublishDiagnostics() == null ||
+			initializeParams.getCapabilities().getTextDocument().getPublishDiagnostics().getRelatedInformation();
 	}
 
 	public WALAServer(Function<WALAServer, Function<String, AbstractAnalysisEngine<InstanceKey, ? extends PropagationCallGraphBuilder, ?>>> languages) {
