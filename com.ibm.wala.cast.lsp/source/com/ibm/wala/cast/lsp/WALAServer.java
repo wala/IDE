@@ -628,10 +628,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	}
 
 	private Boolean supportsRelatedInformation() {
-		return initializeParams == null || 
-			initializeParams.getCapabilities() == null ||
-			initializeParams.getCapabilities().getTextDocument() == null ||
-			initializeParams.getCapabilities().getTextDocument().getPublishDiagnostics() == null ||
+		return initializeParams != null && 
+			initializeParams.getCapabilities() != null &&
+			initializeParams.getCapabilities().getTextDocument() != null &&
+			initializeParams.getCapabilities().getTextDocument().getPublishDiagnostics() != null &&
 			initializeParams.getCapabilities().getTextDocument().getPublishDiagnostics().getRelatedInformation();
 	}
 
@@ -780,6 +780,10 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 						final String hoverMarkupKind = getHoverFormatRequested();
 						final boolean hoverKind = MarkupKind.MARKDOWN.equals(hoverMarkupKind);
 						String msg = positionToString(lookupPos, hoverKind);
+						if ("".equals(msg.trim())) {
+							msg = null;
+						}
+						
 						Hover reply = new Hover();
 						if(hoverKind) {
 							MarkupContent md = new MarkupContent();
@@ -787,7 +791,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 							md.setValue(msg);
 							reply.setContents(md);
 						} else {
-							reply.setContents(Collections.singletonList(Either.forLeft(msg)));
+							reply.setContents(msg == null? null: Collections.singletonList(Either.forLeft(msg)));
 						}
 						return reply;
 					} catch (MalformedURLException | URISyntaxException e) {

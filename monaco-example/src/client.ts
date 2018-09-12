@@ -203,7 +203,7 @@ function createWebSocket(url: string): WebSocket {
 //const url = createUrl('/com.ibm.wala.cast.lsp.tomcat/endpoint')
 //const webSocket = createWebSocket(url);
 //const webSocket = createWebSocket('ws://localhost:8080/WebSocketServerExample/websocketendpoint');
-const webSocket = createWebSocket('ws://localhost:8080/com.ibm.wala.cast.lsp.tomcat/websocket');
+const webSocket = createWebSocket('ws://localhost:8080/wala-ariadne/websocket');
 // listen when the web socket is opened
 listen({
     webSocket,
