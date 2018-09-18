@@ -2,20 +2,18 @@
  * Copyright (c) 2018 TypeFox GmbH (http://www.typefox.io). All rights reserved.
  * Licensed under the MIT License. See License.txt in the project root for license information.
  * ------------------------------------------------------------------------------------------ */
-import { getLanguageService, TextDocument } from "vscode-json-languageservice";
 import { listen, MessageConnection } from 'vscode-ws-jsonrpc';
 import {
-    BaseLanguageClient, CloseAction, ErrorAction,
-    createMonacoServices, createConnection,
-    MonacoToProtocolConverter, ProtocolToMonacoConverter
+    MonacoLanguageClient, CloseAction, ErrorAction,
+    MonacoServices, createConnection
 } from 'monaco-languageclient';
 const ReconnectingWebSocket = require('reconnecting-websocket');
 
 const LANGUAGE_ID = 'python';
-const MODEL_URI = 'file://model.py'
+const MODEL_URI = 'file://no.host/model.py'
 const MONACO_URI = monaco.Uri.parse(MODEL_URI);
 
-// register the JSON language with Monaco
+// register Monaco languages
 monaco.languages.register({
     id: LANGUAGE_ID,
     extensions: ['.py'],
@@ -23,7 +21,7 @@ monaco.languages.register({
     mimetypes: ['text/plain'],
 });
 
-// create the Monaco editor
+// create Monaco editor
 const value = `""" Convolutional Neural Network.
 
 Build and train a convolutional neural network with TensorFlow.
@@ -156,36 +154,13 @@ e = model.evaluate(input_fn)
 print("Testing Accuracy:", e['accuracy'])
 `;
 
-let editor = monaco.editor.create(document.getElementById("container")!, {
+const editor = monaco.editor.create(document.getElementById("container")!, {
     model: monaco.editor.createModel(value, LANGUAGE_ID, MONACO_URI),
     glyphMargin: true,
     lightbulb: {
         enabled: true
     }
 });
-
-    const services = createMonacoServices(editor);
-    function createLanguageClient(connection: MessageConnection): BaseLanguageClient {
-      return new BaseLanguageClient({
-        name: "Sample Language Client",
-        clientOptions: {
-            // use a language id as a document selector
-            documentSelector: [LANGUAGE_ID],
-            // disable the default error handler
-            errorHandler: {
-                error: () => ErrorAction.Continue,
-                closed: () => CloseAction.DoNotRestart
-            }
-        },
-        services,
-        // create a language client connection from the JSON RPC connection on demand
-        connectionProvider: {
-            get: (errorHandler, closeHandler) => {
-                return Promise.resolve(createConnection(connection as any, errorHandler, closeHandler))
-            }
-        }
-      })
-    }
 
 function createWebSocket(url: string): WebSocket {
     const socketOptions = {
@@ -199,11 +174,33 @@ function createWebSocket(url: string): WebSocket {
     return new ReconnectingWebSocket(url, undefined, socketOptions);
 }
 
+function createLanguageClient(connection: MessageConnection): MonacoLanguageClient {
+    return new MonacoLanguageClient({
+        name: "Sample Language Client",
+        clientOptions: {
+            // use a language id as a document selector
+            documentSelector: [LANGUAGE_ID],
+            // disable the default error handler
+            errorHandler: {
+                error: () => ErrorAction.Continue,
+                closed: () => CloseAction.DoNotRestart
+            }
+        },
+        // create a language client connection from the JSON RPC connection on demand
+        connectionProvider: {
+            get: (errorHandler, closeHandler) => {
+                return Promise.resolve(createConnection(connection, errorHandler, closeHandler))
+            }
+        }
+    });
+}
+
+// install Monaco language client services
+MonacoServices.install(editor);
+
 // create the web socket
-//const url = createUrl('/com.ibm.wala.cast.lsp.tomcat/endpoint')
-//const webSocket = createWebSocket(url);
-//const webSocket = createWebSocket('ws://localhost:8080/WebSocketServerExample/websocketendpoint');
 const webSocket = createWebSocket('ws://localhost:8080/wala-ariadne/websocket');
+
 // listen when the web socket is opened
 listen({
     webSocket,
@@ -214,4 +211,3 @@ listen({
         connection.onClose(() => disposable.dispose());
     }
 });
-

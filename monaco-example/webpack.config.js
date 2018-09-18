@@ -30,6 +30,11 @@ const common = {
         child_process: 'empty',
         net: 'empty',
         crypto: 'empty'
+    },
+    resolve: {
+        alias: {
+            'vscode': require.resolve('monaco-languageclient/lib/vscode-compatibility')
+        }
     }
 };
 
@@ -39,20 +44,18 @@ if (process.env['NODE_ENV'] === 'production') {
             new UglifyJSPlugin(),
             new webpack.DefinePlugin({
                 'process.env.NODE_ENV': JSON.stringify('production')
-            }),
-            new webpack.ContextReplacementPlugin(
-                /vscode*/,
-                path.join(__dirname, './client')
-            )
+            })
         ]
     });
 } else {
     module.exports = merge(common, {
-        plugins: [
-            new webpack.ContextReplacementPlugin(
-                /vscode*/,
-                path.join(__dirname, './client')
-            )
-        ]
-    });
+        devtool: 'source-map',
+        module: {
+            rules: [{
+                test: /\.js$/,
+                enforce: 'pre',
+                loader: 'source-map-loader'
+            }]
+        }
+    })
 } 

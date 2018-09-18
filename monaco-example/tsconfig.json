@@ -1,19 +1,10 @@
 {
+    "extends": "./top-tsconfig",
     "compilerOptions": {
         "rootDir": "src",
-	"outDir": "lib",
+        "outDir": "lib",
         "baseUrl": ".",
-        "target": "es6",
-        "module": "commonjs",
-        "moduleResolution": "node",
-        "sourceMap": true,
-        "inlineSources": false,
-        "declaration": true,
-        "stripInternal": true,
-        "lib": ["es6", "dom"],
-        "strict": true,
-        "noImplicitReturns": true,
-///        "noUnusedLocals": true
+        "skipLibCheck": true
     },
     "include": [
         "src"
