@@ -49,6 +49,7 @@ import org.apache.commons.io.input.TeeInputStream;
 import org.apache.commons.io.output.TeeOutputStream;
 import org.eclipse.lsp4j.ApplyWorkspaceEditParams;
 import org.eclipse.lsp4j.ClientCapabilities;
+import org.eclipse.lsp4j.CodeAction;
 import org.eclipse.lsp4j.CodeActionParams;
 import org.eclipse.lsp4j.CodeLens;
 import org.eclipse.lsp4j.CodeLensOptions;
@@ -70,6 +71,7 @@ import org.eclipse.lsp4j.DocumentFormattingParams;
 import org.eclipse.lsp4j.DocumentHighlight;
 import org.eclipse.lsp4j.DocumentOnTypeFormattingParams;
 import org.eclipse.lsp4j.DocumentRangeFormattingParams;
+import org.eclipse.lsp4j.DocumentSymbol;
 import org.eclipse.lsp4j.DocumentSymbolParams;
 import org.eclipse.lsp4j.ExecuteCommandOptions;
 import org.eclipse.lsp4j.ExecuteCommandParams;
@@ -350,11 +352,11 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 	private class WalaSymbolInformation extends SymbolInformation {
 		private final MethodReference function;
 
-		public WalaSymbolInformation(MethodReference function) {
+		private WalaSymbolInformation(MethodReference function) {
 			this.function = function;
 		}
 
-		public MethodReference getFunction() {
+		private MethodReference getFunction() {
 			return function;
 		}	
 
@@ -773,6 +775,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			@Override
 			public CompletableFuture<Hover> hover(TextDocumentPositionParams position) { 
 				return CompletableFuture.supplyAsync(() -> {
+					Hover reply = new Hover();
 					try {
 						String uri = Util.mangleUri(position.getTextDocument().getUri());
 						URL url = new URI(uri).toURL();
@@ -780,23 +783,19 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 						final String hoverMarkupKind = getHoverFormatRequested();
 						final boolean hoverKind = MarkupKind.MARKDOWN.equals(hoverMarkupKind);
 						String msg = positionToString(lookupPos, hoverKind);
-						if ("".equals(msg.trim())) {
-							msg = null;
-						}
 						
-						Hover reply = new Hover();
 						if(hoverKind) {
 							MarkupContent md = new MarkupContent();
 							md.setKind("markdown");
 							md.setValue(msg);
 							reply.setContents(md);
 						} else {
-							reply.setContents(msg == null? null: Collections.singletonList(Either.forLeft(msg)));
+							reply.setContents(Collections.singletonList(Either.forLeft(msg)));
 						}
 						return reply;
 					} catch (MalformedURLException | URISyntaxException e) {
-						assert false : e.toString();
-					return null;
+						reply.setContents(Collections.singletonList(Either.forLeft("")));
+					    return reply;
 					}
 				});
 			}
@@ -891,19 +890,23 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			}
 
 			@Override
-			public CompletableFuture<List<? extends SymbolInformation>> documentSymbol(DocumentSymbolParams params) {
+			public CompletableFuture<List<Either<SymbolInformation, DocumentSymbol>>> documentSymbol(DocumentSymbolParams params) {
 				return CompletableFuture.supplyAsync(() -> {
 					String document = Util.mangleUri(params.getTextDocument().getUri());
 					if (! documentSymbols.containsKey(document)) {
 						return Collections.emptyList();
 					} else {
-						return new LinkedList<WalaSymbolInformation>(documentSymbols.get(document).values());
+						List<Either<SymbolInformation, DocumentSymbol>> l = new LinkedList<>();
+						for(WalaSymbolInformation s : documentSymbols.get(document).values()) {
+							l.add(Either.forLeft(s));
+						}
+						return l;
 					}
 				});
 			}
 
 			@Override
-			public CompletableFuture<List<? extends Command>> codeAction(CodeActionParams params) {
+			public CompletableFuture<List<Either<Command, CodeAction>>> codeAction(CodeActionParams params) {
 				return CompletableFuture.supplyAsync(() -> {
 					Range fixRange = params.getRange();
 					Command fix = new Command();
@@ -916,7 +919,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 								List<Object> args = new LinkedList<Object>(params.getContext().getDiagnostics());
 								args.add(0, params.getTextDocument().getUri());
 								fix.setArguments(args);
-								return Collections.singletonList(fix);	
+								return Collections.singletonList(Either.forLeft(fix));	
 							}
 						}
 					} 
