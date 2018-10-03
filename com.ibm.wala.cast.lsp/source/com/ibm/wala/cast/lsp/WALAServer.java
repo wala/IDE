@@ -426,14 +426,16 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					AstMethod code = ((AstFunctionClass)cls).getCodeBody();
 					Position sourcePosition = code.getSourcePosition();
 					if (sourcePosition != null) {
-						WalaSymbolInformation codeSymbol = new WalaSymbolInformation(code.getReference());
-						codeSymbol.setKind(SymbolKind.Function);
-						codeSymbol.setName(cls.getName().toString());
-						codeSymbol.setLocation(locationFromWALA(sourcePosition));
-
-
 						URI documentURI = getPositionUri(sourcePosition);
 						if(documentURI != null) {
+
+							WalaSymbolInformation codeSymbol = new WalaSymbolInformation(code.getReference());
+							codeSymbol.setKind(SymbolKind.Function);
+							codeSymbol.setName(cls.getName().toString());
+							codeSymbol.setLocation(locationFromWALA(sourcePosition));
+							codeSymbol.setContainerName(documentURI.toString());
+							codeSymbol.setDeprecated(false);
+							
 							final String document = documentURI.toString();
 							if (! documentSymbols.containsKey(document)) {
 								documentSymbols.put(document, HashMapFactory.make());
@@ -947,12 +949,14 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				cl.setCommand(cmd);
 				cl.setRange(sym.getLocation().getRange());
 				result.add(cl);
+				
+				cl.setData(type);
 			}
 
-			public void addRefsCodeLensesForSymbol(WalaSymbolInformation sym, List<CodeLens> result) {
+			public void addCallsCodeLensesForSymbol(WalaSymbolInformation sym, List<CodeLens> result) {
 				CodeLens cl = new CodeLens();
 				final String command = WalaCommand.CALLS.toString();
-				final String title = "refs";
+				final String title = "callers";
 				Command cmd = new Command(title, command);
 				cmd.setArguments(Arrays.asList(sym.getFunction().getDeclaringClass().getName().toString()));
 				cl.setCommand(cmd);
@@ -1009,7 +1013,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			public void addCodeLensesForSymbol(WalaSymbolInformation sym, List<CodeLens> result) {
 				addTypesCodeLensesForSymbol(sym, result);
 				addAssignCodeLensesForSymbol(sym, result);
-				// addRefsCodeLensesForSymbol(sym, result);
+				// addCallsCodeLensesForSymbol(sym, result);
 			}
 
 			@Override
