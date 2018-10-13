@@ -91,6 +91,7 @@ import org.eclipse.lsp4j.Range;
 import org.eclipse.lsp4j.ReferenceParams;
 import org.eclipse.lsp4j.RenameParams;
 import org.eclipse.lsp4j.ServerCapabilities;
+import org.eclipse.lsp4j.ShowMessageRequestParams;
 import org.eclipse.lsp4j.SignatureHelp;
 import org.eclipse.lsp4j.SymbolInformation;
 import org.eclipse.lsp4j.SymbolKind;
@@ -352,9 +353,11 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	private class WalaSymbolInformation extends SymbolInformation {
 		private final MethodReference function;
-
-		private WalaSymbolInformation(MethodReference function) {
+		private final Position namePosition;
+		
+		private WalaSymbolInformation(MethodReference function, Position namePosition) {
 			this.function = function;
+			this.namePosition = namePosition;
 		}
 
 		private MethodReference getFunction() {
@@ -363,7 +366,6 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 		public String toString() {
 			return super.toString() + "(" + getFunction() + ")";
-
 		}
 	}
 
@@ -424,12 +426,13 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			for(IClass cls : CG.getClassHierarchy()) {
 				if (cls instanceof AstFunctionClass) {
 					AstMethod code = ((AstFunctionClass)cls).getCodeBody();
-					Position sourcePosition = code.getSourcePosition();
+					Position sourcePosition = code.debugInfo().getCodeBodyPosition();
 					if (sourcePosition != null) {
 						URI documentURI = getPositionUri(sourcePosition);
 						if(documentURI != null) {
 
-							WalaSymbolInformation codeSymbol = new WalaSymbolInformation(code.getReference());
+							WalaSymbolInformation codeSymbol = 
+								new WalaSymbolInformation(code.getReference(), code.debugInfo().getCodeNamePosition());
 							codeSymbol.setKind(SymbolKind.Function);
 							codeSymbol.setName(cls.getName().toString());
 							codeSymbol.setLocation(locationFromWALA(sourcePosition));
@@ -578,6 +581,28 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			if (supportsRelatedInformation()) {
 				CG.forEach((CGNode n) -> {
 					if (n.getMethod() instanceof AstMethod) {
+						{
+							List<DiagnosticRelatedInformation> relList = new LinkedList<>();
+							CG.getPredNodes(n).forEachRemaining((CGNode caller) -> {
+								if (caller.getMethod() instanceof AstMethod) {
+									CG.getPossibleSites(caller, n).forEachRemaining((CallSiteReference site) -> {
+										for(SSAAbstractInvokeInstruction call : caller.getIR().getCalls(site)) {
+											Position callPos = ((AstMethod)caller.getMethod()).getSourcePosition(call.iindex);
+											DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
+											di.setLocation(locationFromWALA(callPos));
+											try {
+												di.setMessage("call site " + new SourceBuffer(callPos));
+											} catch (IOException e1) {
+												di.setMessage("call site");
+											}
+											relList.add(di);}
+									});
+								}
+							});
+							if (! relList.isEmpty()) {
+								addInfoDiagnostic(diags, relList, ((AstMethod)n.getMethod()).debugInfo().getCodeNamePosition());
+							}
+						}
 						n.iterateCallSites().forEachRemaining((CallSiteReference site) -> {
 							for(SSAAbstractInvokeInstruction inst : n.getIR().getCalls(site)) {
 								List<DiagnosticRelatedInformation> relList = new LinkedList<>();
@@ -590,6 +615,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 										relList.add(di);
 									}
 								});
+								
 								if (! relList.isEmpty()) {
 									CG.getPredNodes(n).forEachRemaining((CGNode caller) -> {
 										if (caller.getMethod() instanceof AstMethod) {
@@ -606,18 +632,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 									});
 
 									Position call = ((AstMethod)n.getMethod()).getSourcePosition(inst.iindex);
-									Diagnostic d = new Diagnostic();
-									Location callPos = locationFromWALA(call);
-									d.setRange(callPos.getRange());
-									d.setSeverity(DiagnosticSeverity.Information);
-									d.setSource("Ariadne");
-									d.setMessage("possible calls");
-									d.setRelatedInformation(relList);
-									String uri = callPos.getUri();
-									if (! diags.containsKey(uri)) {
-										diags.put(uri, new LinkedList<>());
-									}
-									diags.get(uri).add(d);
+									addInfoDiagnostic(diags, relList, call);
 								}
 							}
 						});
@@ -630,6 +645,22 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			assert false : e;
 			return null;
 		}
+	}
+
+	private void addInfoDiagnostic(Map<String, List<Diagnostic>> diags, List<DiagnosticRelatedInformation> relList,
+			Position call) {
+		Diagnostic d = new Diagnostic();
+		Location callPos = locationFromWALA(call);
+		d.setRange(callPos.getRange());
+		d.setSeverity(DiagnosticSeverity.Information);
+		d.setSource("Ariadne");
+		d.setMessage("call information");
+		d.setRelatedInformation(relList);
+		String uri = callPos.getUri();
+		if (! diags.containsKey(uri)) {
+			diags.put(uri, new LinkedList<>());
+		}
+		diags.get(uri).add(d);
 	}
 
 	private Boolean supportsRelatedInformation() {
@@ -947,10 +978,9 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				Command cmd = new Command(title, command);
 				cmd.setArguments(Arrays.asList(typeName));
 				cl.setCommand(cmd);
-				cl.setRange(sym.getLocation().getRange());
-				result.add(cl);
-				
+				cl.setRange(locationFromWALA(sym.namePosition).getRange());
 				cl.setData(type);
+				result.add(cl);
 			}
 
 			public void addCallsCodeLensesForSymbol(WalaSymbolInformation sym, List<CodeLens> result) {
@@ -961,6 +991,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 				cmd.setArguments(Arrays.asList(sym.getFunction().getDeclaringClass().getName().toString()));
 				cl.setCommand(cmd);
 				cl.setRange(sym.getLocation().getRange());
+				cl.setData(title);
 				result.add(cl);
 			}
 
@@ -1013,7 +1044,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 			public void addCodeLensesForSymbol(WalaSymbolInformation sym, List<CodeLens> result) {
 				addTypesCodeLensesForSymbol(sym, result);
 				addAssignCodeLensesForSymbol(sym, result);
-				// addCallsCodeLensesForSymbol(sym, result);
+				//addCallsCodeLensesForSymbol(sym, result);
 			}
 
 			@Override
@@ -1174,7 +1205,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 
 	private CompletableFuture<Object> callersCommand(ExecuteCommandParams params) {
 		return CompletableFuture.supplyAsync(() -> {
-			Set<Either<String,SymbolInformation>> result = HashSetFactory.make();
+			Set<Either<String,Location>> result = HashSetFactory.make();
 			for(CallGraph CG : languageBuilders.values()) {
 				for(IClassLoader loader : CG.getClassHierarchy().getLoaders()) {
 					String typeName = ((JsonPrimitive)params.getArguments().get(0)).getAsString();
@@ -1188,7 +1219,7 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 								String file = fun.getSourcePosition().getURL().toString();
 								if (documentSymbols.containsKey(file)) {
 									SymbolInformation fs = documentSymbols.get(file).get(functionName);
-									result.add(Either.forRight(fs));
+									result.add(Either.forRight(fs.getLocation()));
 									return;
 								}
 							}
@@ -1197,6 +1228,12 @@ public class WALAServer implements LanguageClientAware, LanguageServer {
 					}
 				}
 			}
+			
+			ShowMessageRequestParams reply = new ShowMessageRequestParams();
+			reply.setType(MessageType.Info);
+			reply.setMessage(result.toString());
+			client.showMessageRequest(reply);
+
 			return result;
 		});
 	}
