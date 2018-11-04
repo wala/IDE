@@ -2,4 +2,6 @@ rootProject.name = 'com.ibm.wala.ide'
 
 include(
   'com.ibm.wala.cast.lsp')
-  
+
+enableFeaturePreview('STABLE_PUBLISHING')
+
