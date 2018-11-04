@@ -1,0 +1,38 @@
+buildscript {
+  repositories {
+    maven {
+      url "https://plugins.gradle.org/m2/"
+    }
+  }
+}
+
+apply plugin: 'java'
+apply plugin: 'maven-publish'
+
+sourceSets.main.java.srcDirs = ['source']
+
+version = '0.0.1-SNAPSHOT'
+
+publishing {
+    publications {
+        myLibrary(MavenPublication) {
+            from components.java
+        }
+    }
+}
+    
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+dependencies {
+  compile(
+    'com.ibm.wala:com.ibm.wala.util:1.5.1-SNAPSHOT',
+    'com.ibm.wala:com.ibm.wala.shrike:1.5.1-SNAPSHOT',
+    'com.ibm.wala:com.ibm.wala.core:1.5.1-SNAPSHOT',
+    'com.ibm.wala:com.ibm.wala.cast:1.5.1-SNAPSHOT',
+    'com.ibm.wala:com.ibm.wala.cast.java:1.5.1-SNAPSHOT',
+    'org.eclipse.lsp4j:org.eclipse.lsp4j:0.5.0',
+    'commons-io:commons-io:2.6')
+}
