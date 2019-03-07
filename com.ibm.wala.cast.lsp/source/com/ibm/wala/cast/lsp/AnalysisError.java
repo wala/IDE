@@ -16,8 +16,15 @@ import com.ibm.wala.cast.tree.CAstSourcePositionMap.Position;
 import com.ibm.wala.util.collections.Pair;
 
 public interface AnalysisError {
+	public enum Kind {
+		Diagnostic, Hover, CodeLens
+	}
+	
+	default public Kind kind() { return Kind.Diagnostic; };
+	public String source();
 	public String toString(boolean useMarkdown);
 	public Position position();
 	public Iterable<Pair<Position,String>> related();
 	public DiagnosticSeverity severity();
+	default public String repair() { return null; } ;
 }
