@@ -402,10 +402,10 @@ public class WALAServer extends WALAServerCore {
 				if (M instanceof AstMethod) {
 					AstIR ir = (AstIR)n.getIR();
 					ir.iterateAllInstructions().forEachRemaining((SSAInstruction inst) -> {
-						if (inst.iindex != -1) {
-							Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(inst.iindex);
+						if (inst.iIndex() != -1) {
+							Position pos = ((AstMethod)M).debugInfo().getInstructionPosition(inst.iIndex());
 							if (pos != null) {
-								add(pos, new int[] {CG.getNumber(n), inst.iindex});
+								add(pos, new int[] {CG.getNumber(n), inst.iIndex()});
 							}
 							if (inst.hasDef()) {
 								if (pos != null) {
@@ -414,7 +414,7 @@ public class WALAServer extends WALAServerCore {
 								}
 							}
 							for(int i = 0; i < inst.getNumberOfUses(); i++) {
-								Position p = ((AstMethod)M).debugInfo().getOperandPosition(inst.iindex, i);
+								Position p = ((AstMethod)M).debugInfo().getOperandPosition(inst.iIndex(), i);
 								if (p != null) {
 									PointerKey v = H.getPointerKeyForLocal(n, inst.getUse(i));
 									add(p, v);
@@ -461,7 +461,7 @@ public class WALAServer extends WALAServerCore {
 							LocalPointerKey lpk = (LocalPointerKey)messageVal;
 							CGNode node = lpk.getNode();
 							SSAInstruction def = node.getDU().getDef(lpk.getValueNumber());
-							NormalStatement root = new NormalStatement(node, def.iindex);
+							NormalStatement root = new NormalStatement(node, def.iIndex());
 							Slicer s = new Slicer();
 							Collection<Statement> deps = s.slice(new SDG<InstanceKey>(CG, cgBuilder.getPointerAnalysis(), DataDependenceOptions.FULL, ControlDependenceOptions.NONE), Collections.singleton(root), true);
 							for(Statement dep : deps) {
@@ -477,7 +477,7 @@ public class WALAServer extends WALAServerCore {
 											SSAAbstractInvokeInstruction inst = clr.getInstruction();
 											for(int i = 0; i < inst.getNumberOfUses(); i++) {
 												if (vn == inst.getUse(i)) {
-													depPos = debugInfo.getOperandPosition(inst.iindex, i);
+													depPos = debugInfo.getOperandPosition(inst.iIndex(), i);
 													break;
 												}
 											}
@@ -535,7 +535,7 @@ public class WALAServer extends WALAServerCore {
 								if (caller.getMethod() instanceof AstMethod) {
 									CG.getPossibleSites(caller, n).forEachRemaining((CallSiteReference site) -> {
 										for(SSAAbstractInvokeInstruction call : caller.getIR().getCalls(site)) {
-											Position callPos = ((AstMethod)caller.getMethod()).getSourcePosition(call.iindex);
+											Position callPos = ((AstMethod)caller.getMethod()).getSourcePosition(call.iIndex());
 											DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
 											di.setLocation(locationFromWALA(callPos));
 											try {
@@ -569,7 +569,7 @@ public class WALAServer extends WALAServerCore {
 										if (caller.getMethod() instanceof AstMethod) {
 											CG.getPossibleSites(caller, n).forEachRemaining((CallSiteReference callerSite) -> {
 												for(SSAAbstractInvokeInstruction call : caller.getIR().getCalls(callerSite)) {
-													Position callerPos = ((AstMethod)caller.getMethod()).getSourcePosition(call.iindex);
+													Position callerPos = ((AstMethod)caller.getMethod()).getSourcePosition(call.iIndex());
 													DiagnosticRelatedInformation di = new DiagnosticRelatedInformation();
 													di.setLocation(locationFromWALA(callerPos));
 													di.setMessage("caller " + caller.getMethod());
@@ -579,7 +579,7 @@ public class WALAServer extends WALAServerCore {
 										}
 									});
 
-									Position call = ((AstMethod)n.getMethod()).getSourcePosition(inst.iindex);
+									Position call = ((AstMethod)n.getMethod()).getSourcePosition(inst.iIndex());
 									addInfoDiagnostic(diags, relList, call);
 								}
 							}
@@ -777,7 +777,7 @@ public class WALAServer extends WALAServerCore {
 													for (Iterator<CallSiteReference> sites = CG.getPossibleSites(callerNode, symbolNode); sites.hasNext(); ) {
 														CallSiteReference site = sites.next();
 														SSAInstruction inst = callerIR.getCalls(site)[0];
-														Position p = ((AstMethod)callerNode.getMethod()).getSourcePosition(inst.iindex);
+														Position p = ((AstMethod)callerNode.getMethod()).getSourcePosition(inst.iIndex());
 														result.add(locationFromWALA(p));
 													}
 												}
@@ -992,10 +992,10 @@ public class WALAServer extends WALAServerCore {
 					for (int v = 1; v <= ir.getSymbolTable().getNumberOfParameters(); v++) {
 						if (du.getUses(v).hasNext()) {
 							SSAInstruction inst = du.getUses(v).next();
-							if (inst.iindex != -1) {
+							if (inst.iIndex() != -1) {
 								for (int i = 0; i < inst.getNumberOfUses(); i++) {
 									if (inst.getUse(i) == v) {
-										Position pos = ir.getMethod().debugInfo().getOperandPosition(inst.iindex, i);
+										Position pos = ir.getMethod().debugInfo().getOperandPosition(inst.iIndex(), i);
 										if (pos != null) {
 											String type = positionToType(pos, false);
 											if(type != null) {
