@@ -78,6 +78,7 @@ import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializeResult;
 import org.eclipse.lsp4j.InitializedParams;
 import org.eclipse.lsp4j.Location;
+import org.eclipse.lsp4j.LocationLink;
 import org.eclipse.lsp4j.MarkupContent;
 import org.eclipse.lsp4j.MarkupKind;
 import org.eclipse.lsp4j.MessageParams;
@@ -717,7 +718,7 @@ public class WALAServer extends WALAServerCore {
 			}
 
 			@Override
-			public CompletableFuture<List<? extends Location>> definition(TextDocumentPositionParams position) {
+			public CompletableFuture<Either<List<? extends Location>, List<? extends LocationLink>>> definition(TextDocumentPositionParams position) {
 				return CompletableFuture.supplyAsync(() -> {
 					try {
 						if (findDefinitionAnalysis == null) {
@@ -742,7 +743,7 @@ public class WALAServer extends WALAServerCore {
 							if(locs == null | locs.isEmpty()) {
 								return null;
 							} else {
-								return locs;
+								return Either.forLeft(locs);
 							}
 						} else {
 							return null;
