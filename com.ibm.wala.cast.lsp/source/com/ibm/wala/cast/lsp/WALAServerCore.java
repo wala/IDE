@@ -73,7 +73,7 @@ import org.eclipse.lsp4j.services.WorkspaceService;
 import com.ibm.wala.cast.tree.CAstSourcePositionMap.Position;
 import com.ibm.wala.cast.tree.impl.AbstractSourcePosition;
 import com.ibm.wala.classLoader.Module;
-import com.ibm.wala.util.CancelRuntimeException;
+import com.ibm.wala.core.util.CancelRuntimeException;
 import com.ibm.wala.util.collections.HashMapFactory;
 import com.ibm.wala.util.collections.HashSetFactory;
 import com.ibm.wala.util.collections.Pair;
